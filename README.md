@@ -2,9 +2,15 @@
 
 Replaces the macro-enabled Excel workbook that ran Aug 2023 – Jan 2024.
 
-**Status: Step 1 of 9 complete** — legacy audit, liquidity baseline and
-architecture decision. No application code yet; the domain core is next and is
-gated on the sponsor checkpoint recorded in `docs/ADR-001-architecture.md`.
+**Status: Steps 1–5 of 9 complete.** 125 unit tests passing. A driver can
+publish a journey and a colleague can search and request a seat, in English or
+Bangla, on a 360px phone.
+
+```bash
+npm install && npm run dev     # the app
+npm test                       # 125 unit tests
+npm run typecheck              # TypeScript strict
+```
 
 ## Why this exists
 
@@ -61,15 +67,21 @@ src/
 
 ## Build order
 
-1. ✅ Legacy audit, liquidity baseline, ADR — **sponsor checkpoint**
-2. ⬜ Domain core + tests (pricing, cap, ledger, concurrency). No UI — **sponsor checkpoint**
-3. ⬜ `local-json` adapter, seeded zone graph, migrated legacy data
-4. ⬜ Offer flow → Find flow → booking with concurrency
-5. ⬜ Recurring commute profiles + notification loop — **sponsor checkpoint**
+1. ✅ Legacy audit, liquidity baseline, ADR
+2. ✅ Domain core + tests (pricing, cap, ledger, concurrency)
+3. ✅ `local-json` adapter, seeded zone graph
+4. ✅ Offer flow → Find flow → booking with concurrency
+5. ✅ Recurring commute profiles + notification loop — **sponsor checkpoint**
 6. ⬜ Ratings, incidents, credit ledger UI
-7. ⬜ Production adapter + Excel export
+7. ⬜ Production SharePoint adapter + Excel export
 8. ⬜ Admin + metrics dashboard
 9. ⬜ E2E, load test, accessibility audit, DPIA
+
+Steps 6–9 are not started. Notably still outstanding: the SharePoint/Graph
+adapter (everything runs against `local-json` today), the Excel export, the
+admin dashboard, `docs/DPIA.md` and `docs/PRIVACY_NOTICE.md`, and the
+Playwright E2E suite. The domain core does not change when those land — that
+is what the port boundary is for.
 
 ## Non-negotiables
 
