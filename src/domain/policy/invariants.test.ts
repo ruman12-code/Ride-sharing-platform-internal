@@ -120,12 +120,13 @@ describe("validateBooking", () => {
   });
 
   it("refuses stops that are not on the route, or are in the wrong order", () => {
-    for (const [board, alight] of [
+    const pairs: readonly (readonly [string, string])[] = [
       ["gulshan-2", "uttara"],
       ["savar", "gulshan-2"],
       ["uttara", "savar"],
       ["banani", "banani"],
-    ]) {
+    ];
+    for (const [board, alight] of pairs) {
       const r = validateBooking(req({ boardZoneId: board, alightZoneId: alight }), ctx());
       expect(r.ok === false && r.error.code).toBe("INVALID_INPUT");
     }
