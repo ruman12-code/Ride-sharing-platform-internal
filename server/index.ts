@@ -311,6 +311,28 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
 
         // Told to the sign-in screen so the browser can subscribe to push. The
         // public key is public by design.
+        /*
+          Health, for the host's checker.
+
+          It touches the database rather than just returning 200, because the
+          failure worth catching is exactly the one a plain "the process is
+          alive" check misses: a server running against a volume that did not
+          mount, or a schema that never reached the container. Both start
+          cleanly and fail on the first real request.
+
+          Deliberately open — a checker has no cookie — and it says nothing
+          about who is registered.
+        */
+        if (url.pathname === "/api/health") {
+          try {
+            db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users");
+            return send(200, { ok: true });
+          } catch (e) {
+            console.error("health check failed:", e);
+            return send(503, { ok: false });
+          }
+        }
+
         if (url.pathname === "/api/config") {
           return send(200, {
             selfRegister: true,
@@ -550,6 +572,22 @@ const HOST = SECURE ? "0.0.0.0" : "127.0.0.1";
 const RECONFIRM_WINDOW_MS = 45 * 60_000;
 const SCHEDULER_TICK_MS = 5 * 60_000;
 
+/**
+ * How long after departure a trip is taken to have happened.
+ *
+ * The driver's tap is a confirmation, not a gate. The alternative — a trip that
+ * stays open until somebody remembers to close it, blocking the next posting —
+ * punishes a driver for forgetting a piece of housekeeping by stopping the app
+ * working for them. Drivers are the scarce side of this: one blocked driver is
+ * two or three colleagues without a ride, which is the most damaging failure
+ * available. Plenty of people also post morning and evening, and would have to
+ * close the morning trip while driving it.
+ *
+ * Four hours covers a Dhaka commute and any plausible delay, and lands well
+ * before anybody would be posting the next day's ride.
+ */
+const AUTO_COMPLETE_AFTER_MS = 4 * 3_600_000;
+
 const runReconfirmSweep = (): void => {
   try {
     const now = Date.now();
@@ -590,7 +628,68 @@ const runReconfirmSweep = (): void => {
   }
 };
 
+/**
+ * Close out trips whose departure is well past.
+ *
+ * Completed trips is the number that says whether the pilot worked, so it must
+ * not depend on remembering to tap something after arriving at work. Asking is
+ * still worth doing — the notification below does that, and a colleague who
+ * answers "no" is the signal worth having — but the count does not wait on it.
+ */
+const runAutoCompleteSweep = (): void => {
+  try {
+    const cutoff = new Date(Date.now() - AUTO_COMPLETE_AFTER_MS).toISOString();
+    const due = db.all<{
+      id: string;
+      rideId: string;
+      driverId: string;
+      riderId: string;
+      driverName: string;
+      riderName: string;
+      departureAt: string;
+    }>(
+      `SELECT b.id, b.rideId, r.driverId, b.riderId,
+              d.displayName AS driverName, p.displayName AS riderName,
+              r.departureAt
+         FROM bookings b
+         JOIN rides r ON r.id = b.rideId
+         JOIN users d ON d.id = r.driverId
+         JOIN users p ON p.id = b.riderId
+        WHERE b.status = 'confirmed' AND r.departureAt < ?`,
+      cutoff,
+    );
+    for (const row of due) {
+      db.run(
+        "UPDATE bookings SET status = 'completed', rowVersion = rowVersion + 1 WHERE id = ? AND status = 'confirmed'",
+        row.id,
+      );
+      // Ask both sides whether it actually happened. The trip is closed either
+      // way; this is how a no-show becomes visible, and a no-show is the thing
+      // that stops a driver offering a seat again.
+      const time = row.departureAt.slice(11, 16);
+      void notifier
+        .send(notifications.didItHappen(row.driverId, row.rideId, row.riderName, time))
+        .catch(() => {});
+      void notifier
+        .send(notifications.didItHappen(row.riderId, row.rideId, row.driverName, time))
+        .catch(() => {});
+      db.run(
+        "UPDATE rides SET status = 'completed', rowVersion = rowVersion + 1 WHERE id = ? AND status IN ('published','full')",
+        row.rideId,
+      );
+      db.audit("system", "booking", row.id, "auto-complete");
+    }
+    if (due.length > 0) console.log(`auto-completed ${due.length} trip(s)`);
+  } catch (e) {
+    console.error("auto-complete sweep failed:", e);
+  }
+};
+
 setInterval(runReconfirmSweep, SCHEDULER_TICK_MS).unref();
+setInterval(runAutoCompleteSweep, SCHEDULER_TICK_MS).unref();
+// Once at boot as well: a server that was down over the evening should not wait
+// five minutes to notice that yesterday's trips are over.
+runAutoCompleteSweep();
 
 server.listen(PORT, HOST, () => {
   const scheme = OWN_TLS ? "https" : "http";

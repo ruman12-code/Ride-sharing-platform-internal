@@ -30,6 +30,17 @@ export type MatchLabel = "exact_route" | "on_the_way" | "short_detour";
 export interface MatchResult {
   readonly ride: Ride;
   readonly label: MatchLabel;
+  /**
+   * True when this ride matches but has no seat left.
+   *
+   * Full rides used to be dropped from the results entirely. Showing them,
+   * greyed and unbookable, tells the rider something they cannot otherwise
+   * learn: somebody *does* drive this route at this time. That turns a dead end
+   * into a reason to ask for an alert, or to offer the seat themselves — and it
+   * is the difference between "this app is empty" and "I was a few minutes
+   * late", which are very different conclusions to reach in week one.
+   */
+  readonly full: boolean;
   readonly boardZoneId: Id;
   readonly alightZoneId: Id;
   /** Minutes between the rider's target time and the ride's departure. */
@@ -77,8 +88,10 @@ export const search = (rides: readonly Ride[], q: SearchQuery): readonly MatchRe
   const out: MatchResult[] = [];
 
   for (const ride of rides) {
-    if (ride.status !== "published") continue;
-    if (ride.seatsAvailable < q.seats) continue;
+    // A full ride is still a match — it is shown, greyed, and cannot be booked.
+    // Anything else (draft, cancelled, completed, under way) is not.
+    if (ride.status !== "published" && ride.status !== "full") continue;
+    const full = ride.seatsAvailable < q.seats;
     if (q.riderId && ride.driverId === q.riderId) continue; // never your own ride
     if (dateOf(ride.departureAt) !== targetDate) continue;
 
@@ -98,6 +111,7 @@ export const search = (rides: readonly Ride[], q: SearchQuery): readonly MatchRe
       alightZoneId: q.destinationZoneId,
       timeDeltaMinutes: delta,
       walkingMinutes,
+      full,
       score: 0,
     });
   }
@@ -121,7 +135,14 @@ export const scoreMatch = (m: Omit<MatchResult, "score">, reliability = 100): nu
   LABEL_WEIGHT[m.label] +
   Math.max(0, 60 - m.timeDeltaMinutes) / 2 +
   reliability / 100 -
-  Math.min(m.walkingMinutes, 30) / 10;
+  Math.min(m.walkingMinutes, 30) / 10 -
+  // Below every bookable result, whatever else it has going for it. A full ride
+  // is context, not an option, and it must never sit above a seat somebody can
+  // actually take.
+  (m.full ? FULL_PENALTY : 0);
+
+/** Larger than any label gap, so no full ride can outrank a bookable one. */
+const FULL_PENALTY = 1000;
 
 /**
  * A debounced, in-memory index over published rides.
@@ -139,7 +160,11 @@ export class RideIndex {
   }
 
   add(ride: Ride): void {
-    if (ride.status !== "published") return;
+    // Full rides are indexed too, and `search` marks them so the screen can
+    // grey them out. Excluding them here is a filter the caller cannot see or
+    // override — which is exactly how the greyed-out result went missing after
+    // `search` itself had already been taught to keep them.
+    if (ride.status !== "published" && ride.status !== "full") return;
     const date = dateOf(ride.departureAt);
     let zones = this.byDateZone.get(date);
     if (!zones) {

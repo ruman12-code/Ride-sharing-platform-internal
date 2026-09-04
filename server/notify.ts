@@ -246,6 +246,29 @@ export const notifications = {
     path: "/",
   }),
 
+  /**
+   * "Did that trip happen?"
+   *
+   * Sent shortly after departure, to both sides. The trip is closed
+   * automatically regardless — this is not how the count is maintained, it is
+   * how a trip that did *not* happen gets noticed. A no-show is the failure
+   * that stops a driver offering a seat again, and it is invisible unless
+   * somebody is asked.
+   */
+  didItHappen: (
+    userId: string,
+    rideId: string,
+    counterpartName: string,
+    time: string,
+  ): OutgoingNotification => ({
+    id: `did-it-happen:${rideId}:${userId}`,
+    userId,
+    kind: "did_it_happen",
+    title: `Did the ${time} happen?`,
+    body: `With ${counterpartName}. Tap to confirm, or to say it didn't.`,
+    path: "/",
+  }),
+
   newRideOnYourRoute: (
     riderId: string,
     rideId: string,

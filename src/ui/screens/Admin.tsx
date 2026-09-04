@@ -35,6 +35,7 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
   const today = "2026-09-04";
   const [pending, setPending] = useState<PendingRegistration[]>([]);
   const [approving, setApproving] = useState<string | undefined>();
+  const [removing, setRemoving] = useState<string | undefined>();
   const [justApproved, setJustApproved] = useState<string[]>([]);
   const [inviteName, setInviteName] = useState("");
   const [issued, setIssued] = useState<{ name: string; code: string } | undefined>();
@@ -165,9 +166,61 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
       )}
 
       {/*
-        Minting a code is still here for the colleague who cannot or will not
-        register — no smartphone email, a shared device — but it is no longer
-        the main route in, so it no longer leads.
+        Everybody who is in, and the way to remove them.
+
+        The endpoint existed from the start and had no button, which meant the
+        only way to remove a colleague was to open the database by hand. That is
+        not a thing to discover on the day you need it.
+      */}
+      <p className="section-title">{t("members", lang)}</p>
+      <div className="card flush">
+        {app.people.length === 0 ? (
+          <p className="hint" style={{ margin: 16 }}>{t("noMembers", lang)}</p>
+        ) : (
+          app.people.map((m) => (
+            <div className="result" key={m.id}>
+              <div className="body" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                <div>
+                  <div className="name">{m.displayName}</div>
+                  {m.department && <div className="dept">{m.department}</div>}
+                </div>
+                {/*
+                  Not offered for your own row. Removing yourself would sign you
+                  out of the only account that can approve anybody, and leave
+                  the pilot with no way back in.
+                */}
+                {m.id !== app.identity.userId && (
+                  <button
+                    className="btn ghost"
+                    disabled={removing === m.id}
+                    onClick={() => {
+                      if (!confirm(t("removeConfirm", lang))) return;
+                      setRemoving(m.id);
+                      void fetch("/api/admin/suspend", {
+                        method: "POST",
+                        headers: { "content-type": "application/json" },
+                        body: JSON.stringify({ userId: m.id }),
+                      })
+                        .then((r) => {
+                          if (r.ok) return app.refresh();
+                          return undefined;
+                        })
+                        .finally(() => setRemoving(undefined));
+                    }}
+                  >
+                    {t("remove", lang)}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/*
+        Minting a code is still here for the colleague a sign-in link cannot
+        reach — no usable personal address, a shared device — but it is no
+        longer the main route in, so it no longer leads.
       */}
       <p className="section-title">{t("inviteColleague", lang)}</p>
       <div className="card raised">

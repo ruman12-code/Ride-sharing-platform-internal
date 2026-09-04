@@ -238,6 +238,14 @@ export const STRINGS = {
     bn: "কেউ অপেক্ষায় নেই। যাঁরা নিবন্ধন করবেন তাঁরা এখানে দেখা যাবেন।",
   },
   approving: { en: "Approving…", bn: "অনুমোদন হচ্ছে…" },
+  members: { en: "Colleagues who are in", bn: "যাঁরা যুক্ত আছেন" },
+  noMembers: { en: "Nobody yet.", bn: "এখনো কেউ নেই।" },
+  remove: { en: "Remove", bn: "সরান" },
+  removeConfirm: {
+    en: "Remove this colleague? They are signed out immediately and cannot sign in again.",
+    bn: "এই সহকর্মীকে সরাবেন? তাঁকে সঙ্গে সঙ্গে সাইন আউট করা হবে এবং আর ঢুকতে পারবেন না।",
+  },
+  removed: { en: "Removed", bn: "সরানো হয়েছে" },
   approved: { en: "Approved — they can sign in now", bn: "অনুমোদিত — তাঁরা এখন সাইন ইন করতে পারবেন" },
   registeredAs: { en: "Registered as", bn: "নিবন্ধিত নাম" },
   noOfficialName: {
@@ -311,6 +319,11 @@ export const STRINGS = {
   requestSeat: { en: "Request seat", bn: "সিট চান" },
   alertMe: { en: "Alert me", bn: "জানাবেন" },
   seatsLeft: { en: "seats left", bn: "সিট বাকি" },
+  rideFull: { en: "Full", bn: "পূর্ণ" },
+  rideFullHint: {
+    en: "No seats left on this one — but somebody does drive your route at this time.",
+    bn: "এটিতে আর আসন নেই — তবে এই সময়ে কেউ আপনার পথে যান।",
+  },
   seatLeft: { en: "seat left", bn: "সিট বাকি" },
   minWalk: { en: "min walk", bn: "মিনিট হাঁটা" },
   noMatchTitle: { en: "No match yet", bn: "এখনো কোনো মিল নেই" },
@@ -318,7 +331,20 @@ export const STRINGS = {
     en: "We'll tell you the moment a colleague posts this route.",
     bn: "কোনো সহকর্মী এই রুট দিলে সঙ্গে সঙ্গে জানাব।",
   },
-  alsoWant: { en: "colleagues also want this route", bn: "জন সহকর্মীও এই রুট চান" },
+  /*
+    This line used to read "3 colleagues also want this route" — with the 3
+    written into the source, so it said three whoever searched and whatever was
+    true. It was invented social proof on the screen where a colleague decides
+    whether the app is worth returning to, and the first person to compare notes
+    with a neighbour would have caught it.
+
+    What replaces it is the thing that is actually true and actually useful: ask
+    to be told, and it will tell you.
+  */
+  alsoWant: {
+    en: "Nobody has posted this route yet. Ask to be told, and you'll hear the moment somebody does.",
+    bn: "এই রুটে এখনো কেউ যাত্রা দেননি। জানাতে বললে, কেউ দিলেই আপনি খবর পাবেন।",
+  },
   driveItYourself: { en: "Driving that way yourself?", bn: "নিজেই সেদিকে যাচ্ছেন?" },
   offerASeat: { en: "Offer a seat", bn: "একটি সিট দিন" },
 

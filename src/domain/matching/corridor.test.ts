@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { RideIndex, classifyMatch, scoreMatch, search } from "./corridor.js";
 import { ride } from "../../test/factories.js";
 import type { SearchQuery } from "./corridor.js";
+import type { Ride } from "../entities/ride.js";
 
 // Uttara -> Khilkhet -> Banani -> Gulshan-2, departing 07:45.
 const northbound = ride({ id: "r-north" });
@@ -61,15 +62,16 @@ describe("search filters", () => {
     expect(search([northbound], query({ targetTime: "2026-09-05T07:45:00+06:00" }))).toHaveLength(0);
   });
 
-  it("excludes rides that are not published", () => {
-    for (const status of ["draft", "full", "cancelled", "completed", "in_progress"] as const) {
+  it("excludes rides that cannot be travelled on", () => {
+    for (const status of ["draft", "cancelled", "completed", "in_progress"] as const) {
       expect(search([ride({ status })], query())).toHaveLength(0);
     }
   });
 
-  it("excludes rides without enough seats", () => {
-    expect(search([ride({ seatsAvailable: 1 })], query({ seats: 2 }))).toHaveLength(0);
-    expect(search([ride({ seatsAvailable: 2 })], query({ seats: 2 }))).toHaveLength(1);
+  it("marks a ride without enough seats rather than dropping it", () => {
+    // See "rides with no seat left" below: shown greyed, not hidden.
+    expect(search([ride({ seatsAvailable: 1 })], query({ seats: 2 }))[0]?.full).toBe(true);
+    expect(search([ride({ seatsAvailable: 2 })], query({ seats: 2 }))[0]?.full).toBe(false);
   });
 
   it("never returns the searcher's own ride", () => {
@@ -118,6 +120,7 @@ describe("ranking", () => {
       alightZoneId: "gulshan-2",
       timeDeltaMinutes: 0,
       walkingMinutes: 25,
+      full: false,
     });
     const near = scoreMatch({
       ride: northbound,
@@ -126,6 +129,7 @@ describe("ranking", () => {
       alightZoneId: "gulshan-2",
       timeDeltaMinutes: 0,
       walkingMinutes: 2,
+      full: false,
     });
     expect(near).toBeGreaterThan(far);
   });
@@ -138,12 +142,66 @@ describe("ranking", () => {
       alightZoneId: "gulshan-2",
       timeDeltaMinutes: 10,
       walkingMinutes: 5,
+      full: false,
     };
     expect(scoreMatch(base, 100)).toBeGreaterThan(scoreMatch(base, 40));
   });
 });
 
+describe("rides with no seat left", () => {
+  /*
+    Shown, greyed, unbookable — not hidden.
+
+    Dropping them told a rider searching Uttara→Gulshan-2 at 07:45 exactly what
+    an empty app tells them: nothing here. Showing the full ride tells them
+    somebody does drive this, which is what turns a dead end into "alert me" or
+    "I'll drive tomorrow". In week one that is the difference between a colleague
+    concluding the app is empty and concluding they were a few minutes late.
+  */
+  const full = (over: Partial<Ride> = {}) => ride({ seatsAvailable: 0, status: "full", ...over });
+
+  it("still appears in the results", () => {
+    const results = search([full()], query());
+    expect(results).toHaveLength(1);
+    expect(results[0]?.full).toBe(true);
+  });
+
+  it("is marked so the screen can grey it out", () => {
+    expect(search([ride()], query())[0]?.full).toBe(false);
+  });
+
+  it("counts as full when it has seats but not enough of them", () => {
+    const results = search([ride({ seatsAvailable: 1 })], { ...query(), seats: 2 });
+    expect(results[0]?.full).toBe(true);
+  });
+
+  it("never outranks a ride somebody can actually book", () => {
+    // Even when the full one is the better match on every other axis: exact
+    // time, no walk. A full ride is context, not an option.
+    const perfect = full({ id: "full-and-perfect", departureAt: "2026-09-04T07:45:00+06:00" });
+    const bookable = ride({ id: "bookable", departureAt: "2026-09-04T08:10:00+06:00" });
+    const results = search([perfect, bookable], query());
+    expect(results.map((r) => r.ride.id)).toEqual(["bookable", "full-and-perfect"]);
+  });
+
+  it("is still excluded once cancelled or completed", () => {
+    for (const status of ["cancelled", "completed"] as const) {
+      expect(search([full({ status })], query())).toHaveLength(0);
+    }
+  });
+});
+
 describe("RideIndex", () => {
+  it("indexes full rides too, or the greyed-out result never reaches the screen", () => {
+    // `search` and `RideIndex` filter separately, and the index is the one the
+    // app actually calls. Teaching only `search` to keep full rides left the
+    // screen exactly as it was.
+    const index = new RideIndex([ride({ seatsAvailable: 0, status: "full" })]);
+    const results = index.search(query());
+    expect(results).toHaveLength(1);
+    expect(results[0]?.full).toBe(true);
+  });
+
   it("returns the same results as a full scan", () => {
     const rides = [
       northbound,
@@ -169,8 +227,13 @@ describe("RideIndex", () => {
     expect(index.candidates(query()).length).toBeLessThan(rides.length);
   });
 
-  it("ignores unpublished rides entirely", () => {
-    const index = new RideIndex([ride({ status: "draft" }), ride({ id: "r-2", status: "full" })]);
+  it("ignores rides that cannot be travelled on", () => {
+    // Full is not one of them: it is a match the rider should see, greyed.
+    const index = new RideIndex([
+      ride({ status: "draft" }),
+      ride({ id: "r-2", status: "cancelled" }),
+      ride({ id: "r-3", status: "completed" }),
+    ]);
     expect(index.candidates(query())).toHaveLength(0);
   });
 

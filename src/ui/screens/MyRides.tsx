@@ -70,8 +70,15 @@ export const MyRides = ({ app, lang }: { app: App; lang: Lang }) => {
           key: r.id,
           bookingId: undefined as string | undefined,
           status: r.status as string,
+          // Whether this ride is closed to new riders, so the card can say so
+          // rather than leaving the driver to read "0 seats left" and work it
+          // out. This is the state they asked to be able to see at a glance.
+          closed: r.status === "full" || r.seatsAvailable === 0,
           title: `${zoneName(r.zoneSequence[0]!, lang)} → ${zoneName(r.zoneSequence.at(-1)!, lang)}`,
-          who: `${num(r.seatsAvailable, lang)} ${t(r.seatsAvailable === 1 ? "seatLeft" : "seatsLeft", lang)}`,
+          who:
+            r.seatsAvailable === 0
+              ? t("rideFull", lang)
+              : `${num(r.seatsAvailable, lang)} ${t(r.seatsAvailable === 1 ? "seatLeft" : "seatsLeft", lang)}`,
           when: timeOf(r.departureAt, lang),
           amount: r.costSharePerSeat,
         }))
@@ -81,6 +88,7 @@ export const MyRides = ({ app, lang }: { app: App; lang: Lang }) => {
             key: b.id,
             bookingId: b.id,
             status: b.status,
+            closed: false,
             title: `${zoneName(b.boardZoneId, lang)} → ${zoneName(b.alightZoneId, lang)}`,
             who: userById(ride?.driverId ?? "")?.displayName ?? "",
             when: ride ? timeOf(ride.departureAt, lang) : "",
@@ -112,12 +120,16 @@ export const MyRides = ({ app, lang }: { app: App; lang: Lang }) => {
       ) : (
         <div className="card flush">
           {rows.map((r) => (
-            <div className="result" key={r.key}>
+            <div className={`result${r.closed ? " full" : ""}`} key={r.key}>
               <div className="body">
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                   <div>
                     <div className="name">{r.title}</div>
-                    <div className="dept">{r.who}</div>
+                    {r.closed ? (
+                      <span className="badge full">{t("rideFull", lang)}</span>
+                    ) : (
+                      <div className="dept">{r.who}</div>
+                    )}
                   </div>
                   <div style={{ textAlign: "end" }}>
                     <div className="when">{r.when}</div>

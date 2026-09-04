@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "./db.js";
 import { Access, type ApprovalResult, CODE_VALID_DAYS, generateCode } from "./access.js";
+import { MagicLinks } from "./magic-link.js";
 
 /**
  * What is left of `Access` after sign-in links took over.
@@ -163,8 +164,25 @@ describe("suspending", () => {
 
     // The open session is destroyed, not left to lapse.
     expect(db.all("SELECT token FROM sessions WHERE userId = ?", userId)).toHaveLength(0);
-    const row = db.get<{ status: string }>("SELECT status FROM users WHERE id = ?", userId)!;
-    expect(row.status).toBe("suspended");
+    const row = db.get<{ status: string; isSuspended: number }>(
+      "SELECT status, isSuspended FROM users WHERE id = ?",
+      userId,
+    )!;
+    // Both columns: the doors read one and the booking rules read the other.
+    expect(row).toEqual({ status: "suspended", isSuspended: 1 });
+  });
+
+  it("kills a sign-in link that is already in their inbox", () => {
+    const { userId } = access.invite("Nusrat", "admin");
+    db.run("UPDATE users SET email = 'nusrat@personal.com', status = 'approved' WHERE id = ?", userId);
+    const links = new MagicLinks(db);
+    const { token } = links.request("nusrat@personal.com")!;
+
+    access.suspend(userId, "admin");
+
+    // Otherwise a mail sent a minute ago is a way back in for somebody who has
+    // just been removed.
+    expect(links.redeem(token)).toBeUndefined();
   });
 
   it("writes an audit row", () => {

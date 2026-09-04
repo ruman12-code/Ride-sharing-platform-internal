@@ -1,0 +1,79 @@
+# Fly.io deployment for the Ekpothe pilot.
+#
+# Chosen over a serverless host for one reason that is not negotiable: this app
+# keeps its data in a single SQLite file and runs a timer that closes out trips
+# and sends reconfirmations. Serverless platforms give you neither a disk that
+# survives a deploy nor a process that stays alive between requests, so on one
+# the pilot would lose rides and bookings continuously.
+#
+# First time:
+#   fly launch --no-deploy --name ekpothe
+#   fly volumes create data --size 1 --region sin
+#   fly secrets set ADMIN_EMAIL=... SMTP_HOST=... SMTP_PORT=587 \
+#                   SMTP_USER=... SMTP_PASS=... SMTP_FROM='Ekpothe <...>' \
+#                   VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... \
+#                   VAPID_SUBJECT=mailto:... APP_URL=https://ekpothe.fly.dev
+#   fly deploy
+#
+# Secrets are set with `fly secrets`, never written here: this file is in git.
+
+app = "ekpothe"
+# Singapore is the closest Fly region to Dhaka. Latency is not the point —
+# a single machine is, so that one SQLite file has exactly one writer.
+primary_region = "sin"
+
+[build]
+
+[env]
+  PORT = "8080"
+  DB_PATH = "/data/carpool.db"
+  # Fly terminates TLS at the edge, so the process serves plain HTTP behind it
+  # and must be told the connection reached the user securely.
+  TRUST_PROXY = "1"
+  # Work addresses are refused at registration. See server/accounts.ts.
+  BLOCKED_EMAIL_DOMAINS = "giz.de"
+
+# The database. Without this the file lives in the image and every deploy
+# starts the pilot again from nothing.
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Never stop the machine.
+  #
+  # The default is to suspend an idle app and wake it on the next request. That
+  # is wrong here twice over: the timer that closes trips and sends the T-45
+  # reconfirmation cannot run on a stopped machine, and a colleague opening a
+  # notification would wait for a cold start.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+# Exactly one machine, deliberately.
+#
+# SQLite is a single file with a single writer. A second machine would be a
+# second process writing its own copy on its own volume, and the two would
+# diverge silently — two colleagues would see different rides. If this ever
+# needs to scale past one machine, the storage has to change first.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpus = 1
+
+[checks]
+  [checks.up]
+    type = "http"
+    port = 8080
+    method = "get"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"

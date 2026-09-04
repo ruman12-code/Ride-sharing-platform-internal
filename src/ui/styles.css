@@ -773,3 +773,22 @@ input[type="range"]::-moz-range-thumb {
   color: var(--green-dark);
   text-decoration: none;
 }
+
+/*
+  A ride with no seat left.
+
+  Dimmed rather than removed: it is there to tell the rider that somebody does
+  drive this route at this time, which is the difference between "the app is
+  empty" and "I was a few minutes late". Kept legible — this is information, not
+  a disabled control, so it stays above the contrast floor rather than fading to
+  the point where reading it is a squint.
+*/
+.result.full { opacity: 0.72; }
+.result.full .name,
+.result.full .when,
+.result.full .cost { color: var(--ink-soft); }
+.badge.full {
+  background: var(--warn-wash, #f4ede0);
+  color: var(--warn-ink, #7a5216);
+  font-weight: 650;
+}

@@ -195,9 +195,17 @@ export class Access {
   }
 
   suspend(userId: string, adminId: string): void {
-    this.db.run("UPDATE users SET status = 'suspended' WHERE id = ?", userId);
-    // Ending access must end it now, not at the next login.
+    // Both columns. `status` is what the doors check and `isSuspended` is what
+    // the booking rules check; setting only one leaves somebody who cannot sign
+    // in but whose bookings the domain still treats as a colleague in good
+    // standing, which is a state nobody would think to look for.
+    this.db.run("UPDATE users SET status = 'suspended', isSuspended = 1 WHERE id = ?", userId);
+    // Ending access must end it now, not at the next sign-in.
     this.db.run("DELETE FROM sessions WHERE userId = ?", userId);
+    // Any live sign-in link is dead too, or a mail sent a minute ago is a way
+    // back in for somebody who has just been removed.
+    this.db.run("UPDATE login_links SET usedAt = ? WHERE userId = ? AND usedAt IS NULL",
+      new Date().toISOString(), userId);
     this.db.audit(adminId, "user", userId, "suspend");
   }
 }

@@ -140,7 +140,7 @@ export const FindFlow = ({
             {results.map((m) => {
               const driver = userById(m.ride.driverId);
               return (
-                <div className="result" key={m.ride.id}>
+                <div className={`result${m.full ? " full" : ""}`} key={m.ride.id}>
                   <div className="avatar" aria-hidden="true">{initials(driver?.displayName ?? "?")}</div>
                   <div className="body">
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
@@ -157,17 +157,32 @@ export const FindFlow = ({
                     <div className="meta">
                       <span className={`badge ${m.label}`}>{t(m.label, lang)}</span>
                       <span>{num(m.walkingMinutes, lang)} {t("minWalk", lang)}</span>
-                      <span>
-                        {num(m.ride.seatsAvailable, lang)}{" "}
-                        {t(m.ride.seatsAvailable === 1 ? "seatLeft" : "seatsLeft", lang)}
-                      </span>
+                      {m.full ? (
+                        <span className="badge full">{t("rideFull", lang)}</span>
+                      ) : (
+                        <span>
+                          {num(m.ride.seatsAvailable, lang)}{" "}
+                          {t(m.ride.seatsAvailable === 1 ? "seatLeft" : "seatsLeft", lang)}
+                        </span>
+                      )}
                       {m.ride.preferences.womenOnly && <span className="badge muted">{t("womenOnly", lang)}</span>}
                       {m.ride.preferences.ac && <span className="badge muted">{t("ac", lang)}</span>}
                     </div>
 
-                    <button className="btn primary block" style={{ marginTop: 10 }} onClick={() => setSelected(m)}>
-                      {t("requestSeat", lang)}
-                    </button>
+                    {/*
+                      A full ride is shown but cannot be asked for. The line
+                      underneath says why it is here at all — otherwise a greyed
+                      card with a dead button reads as a bug.
+                    */}
+                    {m.full ? (
+                      <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
+                        {t("rideFullHint", lang)}
+                      </p>
+                    ) : (
+                      <button className="btn primary block" style={{ marginTop: 10 }} onClick={() => setSelected(m)}>
+                        {t("requestSeat", lang)}
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -185,7 +200,7 @@ export const FindFlow = ({
               {destination ? zoneName(destination, lang) : ""} {num(time, lang)}
             </h3>
             <p>
-              {alerted ? t("noMatchBody", lang) : `${num(3, lang)} ${t("alsoWant", lang)}`}
+              {alerted ? t("noMatchBody", lang) : t("alsoWant", lang)}
             </p>
             <button
               className="btn secondary block"
