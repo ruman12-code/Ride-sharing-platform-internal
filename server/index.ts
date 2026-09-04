@@ -6,6 +6,7 @@ import { extname, join, normalize } from "node:path";
 import { Db } from "./db.js";
 import { Api, type Session } from "./api.js";
 import { Access, parseAllowedDomains } from "./access.js";
+import { accessCodeEmail, createMailer } from "./mailer.js";
 import { FUEL_PRICES } from "../src/adapters/local-json/seed/fuel.js";
 
 /**
@@ -70,6 +71,20 @@ if (ALLOWED_DOMAINS.length === 0) {
   process.exit(1);
 }
 
+/**
+ * Domains approved without an administrator.
+ *
+ * Only honoured when SMTP is configured, because the code has to reach the
+ * address for the domain to prove anything. Defaults to the allowed domains,
+ * so configuring email is all it takes to make joining self-service.
+ */
+const AUTO_APPROVE_DOMAINS = parseAllowedDomains(
+  process.env["AUTO_APPROVE_DOMAINS"] ?? process.env["ALLOWED_EMAIL_DOMAINS"],
+);
+
+/** Public address of the app, used in the email that carries the code. */
+const APP_URL = process.env["APP_URL"] ?? `http://localhost:${PORT}`;
+
 /** The first administrator, who approves everybody else. */
 const ADMIN_EMAIL = (process.env["ADMIN_EMAIL"] ?? "").trim().toLowerCase();
 if (!ADMIN_EMAIL) {
@@ -83,9 +98,15 @@ if (!ADMIN_EMAIL) {
 
 const db = new Db(DB_PATH);
 const api = new Api(db);
-// Salts the hashed addresses used for rate limiting. Regenerated on restart:
-// the counter is a rate limit, not a log, so losing it is correct.
-const access = new Access(db, ALLOWED_DOMAINS, randomUUID());
+const mailer = createMailer();
+const access = new Access(db, {
+  allowedDomains: ALLOWED_DOMAINS,
+  autoApproveDomains: AUTO_APPROVE_DOMAINS,
+  canSendEmail: mailer.enabled,
+  // Salts the hashed addresses used for rate limiting. Regenerated on restart:
+  // the counter is a rate limit, not a log, so losing it is correct.
+  ipPepper: randomUUID(),
+});
 
 // Seed the administrator, approved and with a code, so there is a way in on a
 // brand-new database.
@@ -188,7 +209,18 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
             req.socket.remoteAddress ??
             "unknown";
-          return send(200, access.request(String(b["email"] ?? ""), String(b["displayName"] ?? ""), ip));
+          const email = String(b["email"] ?? "");
+          const outcome = access.request(email, String(b["displayName"] ?? ""), ip);
+
+          // The code goes to the mailbox, never back to the browser. Returning
+          // it here would defeat the point of emailing it: the whole reason
+          // this is safe is that only the mailbox owner can read it.
+          if (outcome.code) {
+            const mail = accessCodeEmail(outcome.code, APP_URL);
+            await mailer.send(email, mail.subject, mail.text);
+          }
+          const { code: _code, userId: _userId, ...safe } = outcome;
+          return send(200, safe);
         }
 
         if (url.pathname === "/api/sign-in" && req.method === "POST") {
@@ -316,6 +348,11 @@ server.listen(PORT, HOST, () => {
   console.log(`  ${scheme}://${HOST === "0.0.0.0" ? "0.0.0.0" : "localhost"}:${PORT}`);
   console.log(`  database:   ${DB_PATH}`);
   console.log(`  domains:    ${ALLOWED_DOMAINS.map((d) => `@${d}`).join(", ")}`);
+  console.log(
+    mailer.enabled
+      ? `  joining:    automatic — codes emailed to ${AUTO_APPROVE_DOMAINS.map((d) => `@${d}`).join(", ")}`
+      : "  joining:    manual — no SMTP configured, so codes are relayed by the admin",
+  );
   console.log(`  admin:      ${ADMIN_EMAIL}`);
   if (OWN_TLS) {
     console.log(`  TLS:        this process, from TLS_CERT and TLS_KEY`);

@@ -5,19 +5,23 @@ import type { Db } from "./db.js";
  * Who is allowed in.
  *
  * The pilot is deliberately reachable by anyone — a public URL a colleague can
- * open on their phone without going through IT. What is *not* public is
- * access. Three gates stand between finding the URL and using the app:
+ * open on their phone without going through IT. What is *not* public is access.
  *
- *   1. The email must be on an allowed work domain. A gmail address is refused
- *      at the door, so a colleague's brother never reaches the queue.
- *   2. An administrator who recognises the name approves the request. This is
- *      the gate that actually matters: a person deciding about a person.
- *   3. A single-use code, issued to that one colleague and consumed on first
- *      use, binds the session to them.
+ * Two ways through, depending on whether the server can send email.
  *
- * The third gate is what a shared passphrase could never provide. A passphrase
- * proves somebody knows a secret; a code issued to one email and usable once
- * proves it is that colleague.
+ * **With email (automatic).** The address must be on an allowed work domain,
+ * and the code is sent to that address. Receiving it proves the mailbox belongs
+ * to whoever asked, so no administrator is needed. This is the important part:
+ * on its own, a domain check is a *claim*, not a proof — anyone can type
+ * `someone@giz.de`. Sending the code to the address is what makes automatic
+ * approval safe rather than merely convenient.
+ *
+ * **Without email (manual).** The request waits for an administrator who
+ * recognises the name, and the code is relayed by hand. Slower, and it does not
+ * scale past a few dozen people, but it is a person deciding about a person.
+ *
+ * Either way a code is single-use, bound to one address, and expires — so a
+ * forwarded code is worthless.
  */
 
 export type AccessStatus = "pending" | "approved" | "suspended";
@@ -26,7 +30,21 @@ export interface AccessRequestResult {
   readonly ok: boolean;
   /** Shown to the person who asked. Never says whether an account exists. */
   readonly message: string;
+  /** True when the address is outside every allowed organisation. */
+  readonly outsideOrganisation?: boolean;
 }
+
+/**
+ * The reply to an address outside every allowed organisation.
+ *
+ * The organisation's own wording. It says this is a scope decision rather than
+ * a fault, and leaves a door open — which matters, because the person reading
+ * it may well be a partner-organisation colleague who genuinely shares the
+ * commute.
+ */
+export const NOT_IN_ORGANISATION =
+  "Sorry! You are not in our organisation. " +
+  "Please wait until your organisation is listed, or contact the admin.";
 
 /** Work domains whose addresses may request access. */
 export const parseAllowedDomains = (raw: string | undefined): readonly string[] =>
@@ -79,12 +97,45 @@ export const MAX_REQUESTS_PER_HOUR = 5;
 const hashIp = (ip: string, pepper: string): string =>
   createHash("sha256").update(`${pepper}:${ip}`).digest("hex");
 
+export interface AccessOptions {
+  /** Domains that may request access at all. */
+  readonly allowedDomains: readonly string[];
+  /**
+   * Domains approved without an administrator, **when a code can be emailed**.
+   *
+   * Never honoured without a working mailer: automatic approval on an
+   * unverified address would admit anybody who knows the domain.
+   */
+  readonly autoApproveDomains: readonly string[];
+  readonly canSendEmail: boolean;
+  readonly ipPepper: string;
+}
+
 export class Access {
+  private readonly allowedDomains: readonly string[];
+  private readonly autoApproveDomains: readonly string[];
+  private readonly canSendEmail: boolean;
+  private readonly ipPepper: string;
+
   constructor(
     private readonly db: Db,
-    private readonly allowedDomains: readonly string[],
-    private readonly ipPepper: string,
-  ) {}
+    options: AccessOptions,
+  ) {
+    this.allowedDomains = options.allowedDomains;
+    this.autoApproveDomains = options.autoApproveDomains;
+    this.canSendEmail = options.canSendEmail;
+    this.ipPepper = options.ipPepper;
+  }
+
+  /**
+   * May this address skip the administrator?
+   *
+   * Only when a code can actually be emailed to it. Without that, the address
+   * is unverified and the domain proves nothing.
+   */
+  autoApproves(email: string): boolean {
+    return this.canSendEmail && emailIsAllowed(email, this.autoApproveDomains);
+  }
 
   /**
    * A colleague asks for access.
@@ -93,48 +144,74 @@ export class Access {
    * named somebody already approved. Anything else turns this form into a way
    * of discovering who works here.
    */
-  request(email: string, displayName: string, ip: string): AccessRequestResult {
-    const same = {
+  request(
+    email: string,
+    displayName: string,
+    ip: string,
+  ): AccessRequestResult & { readonly userId?: string; readonly code?: string } {
+    const normalised = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalised)) {
+      return { ok: false, message: "That doesn't look like an email address." };
+    }
+
+    // Refused with the organisation's own wording, so a colleague from a
+    // partner organisation understands this is a scope decision rather than a
+    // fault, and knows what to do about it.
+    if (!emailIsAllowed(normalised, this.allowedDomains)) {
+      return { ok: false, message: NOT_IN_ORGANISATION, outsideOrganisation: true };
+    }
+
+    const same: AccessRequestResult = {
       ok: true,
       message:
         "Thanks — your request has gone to the administrator. " +
         "You'll be sent a code once it's approved.",
     };
 
-    const normalised = email.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalised)) {
-      return { ok: false, message: "That doesn't look like an email address." };
-    }
-
-    // Refused loudly, because a colleague who typed a personal address needs to
-    // know why rather than waiting for an approval that will never come.
-    if (!emailIsAllowed(normalised, this.allowedDomains)) {
-      return {
-        ok: false,
-        message: `Please use your work email address (${this.allowedDomains
-          .map((d) => `@${d}`)
-          .join(" or ")}).`,
-      };
-    }
-
     if (this.tooManyRecently(ip)) return same;
     this.recordAttempt(ip);
 
-    const existing = this.db.get<{ id: string }>(
-      "SELECT id FROM users WHERE email = ?",
+    const existing = this.db.get<{ id: string; status: string }>(
+      "SELECT id, status FROM users WHERE email = ?",
       normalised,
     );
-    if (existing) return same;
 
+    // Somebody already approved asking again is not an error: they have lost
+    // their code. Issue a fresh one, which invalidates the old, and say the
+    // same thing as always so the form still cannot be used to find out who
+    // works here.
+    if (existing) {
+      if (this.autoApproves(normalised)) {
+        const issued = this.approve(existing.id, "system");
+        return { ...this.emailedMessage(), userId: existing.id, ...(issued ? { code: issued.code } : {}) };
+      }
+      return same;
+    }
+
+    const userId = randomUUID();
     this.db.run(
       `INSERT INTO users (id, displayName, email, status, createdAt)
        VALUES (?, ?, ?, 'pending', ?)`,
-      randomUUID(),
+      userId,
       displayName.trim().slice(0, 80) || normalised.split("@")[0],
       normalised,
       new Date().toISOString(),
     );
-    return same;
+
+    if (this.autoApproves(normalised)) {
+      const issued = this.approve(userId, "system");
+      return { ...this.emailedMessage(), userId, ...(issued ? { code: issued.code } : {}) };
+    }
+    return { ...same, userId };
+  }
+
+  private emailedMessage(): AccessRequestResult {
+    return {
+      ok: true,
+      message:
+        "Welcome — we've emailed your code to your work address. " +
+        "It works once and expires in seven days.",
+    };
   }
 
   private tooManyRecently(ip: string): boolean {

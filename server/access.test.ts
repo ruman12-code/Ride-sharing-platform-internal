@@ -6,6 +6,7 @@ import { Db } from "./db.js";
 import {
   Access,
   CODE_VALID_DAYS,
+  NOT_IN_ORGANISATION,
   MAX_REQUESTS_PER_HOUR,
   emailIsAllowed,
   generateCode,
@@ -25,7 +26,12 @@ let access: Access;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "ekpothe-"));
   db = new Db(join(dir, "t.db"));
-  access = new Access(db, ["example.org"], "test-pepper");
+  access = new Access(db, {
+    allowedDomains: ["example.org"],
+    autoApproveDomains: [],
+    canSendEmail: false,
+    ipPepper: "test-pepper",
+  });
 });
 afterEach(() => {
   db.close();
@@ -75,10 +81,11 @@ describe("requesting access", () => {
     expect(access.pending().map((p) => p.email)).toEqual(["nusrat@example.org"]);
   });
 
-  it("tells a personal address why, so nobody waits for an approval that will never come", () => {
+  it("tells an outside address it is out of scope, in the organisation's own words", () => {
     const r = access.request("someone@gmail.com", "Someone", "1.2.3.4");
     expect(r.ok).toBe(false);
-    expect(r.message).toContain("@example.org");
+    expect(r.message).toBe(NOT_IN_ORGANISATION);
+    expect(r.outsideOrganisation).toBe(true);
     expect(access.pending()).toHaveLength(0);
   });
 
@@ -209,5 +216,63 @@ describe("generateCode", () => {
     for (let i = 0; i < 200; i += 1) {
       expect(generateCode()).not.toMatch(/[O0I1]/);
     }
+  });
+});
+
+
+describe("automatic approval", () => {
+  const withEmail = (canSendEmail: boolean) =>
+    new Access(db, {
+      allowedDomains: ["giz.de"],
+      autoApproveDomains: ["giz.de"],
+      canSendEmail,
+      ipPepper: "test-pepper",
+    });
+
+  it("approves and issues a code when the code can be emailed", () => {
+    // Receiving the code is what proves the mailbox belongs to whoever asked.
+    const a = withEmail(true);
+    const r = a.request("nusrat@giz.de", "Nusrat Jahan", "1.2.3.4");
+    expect(r.ok).toBe(true);
+    expect(r.code).toMatch(/^[A-Z2-9]{6}$/);
+    expect(a.pending()).toHaveLength(0);
+    expect(a.redeem("nusrat@giz.de", r.code!)).toBe(r.userId);
+  });
+
+  it("refuses to auto-approve when no code can be sent", () => {
+    // Otherwise a domain check is a claim, not a proof: anybody can type an
+    // address at the allowed domain and walk in.
+    const a = withEmail(false);
+    const r = a.request("stranger@giz.de", "Stranger", "1.2.3.4");
+    expect(r.code).toBeUndefined();
+    expect(a.pending()).toHaveLength(1);
+  });
+
+  it("still refuses an outside domain, even with email working", () => {
+    const a = withEmail(true);
+    const r = a.request("someone@gmail.com", "Someone", "1.2.3.4");
+    expect(r.ok).toBe(false);
+    expect(r.message).toBe(NOT_IN_ORGANISATION);
+  });
+
+  it("reissues to somebody who lost their code, invalidating the old one", () => {
+    const a = withEmail(true);
+    const first = a.request("nusrat@giz.de", "Nusrat", "1.2.3.4");
+    const second = a.request("nusrat@giz.de", "Nusrat", "1.2.3.4");
+    expect(second.code).toBeDefined();
+    expect(second.code).not.toBe(first.code);
+    expect(a.redeem("nusrat@giz.de", first.code!)).toBeUndefined();
+    expect(a.redeem("nusrat@giz.de", second.code!)).toBe(first.userId);
+  });
+
+  it("does not auto-approve a domain that is allowed but not listed for it", () => {
+    const a = new Access(db, {
+      allowedDomains: ["giz.de", "partner.org"],
+      autoApproveDomains: ["giz.de"],
+      canSendEmail: true,
+      ipPepper: "test-pepper",
+    });
+    expect(a.request("colleague@partner.org", "P", "1.2.3.4").code).toBeUndefined();
+    expect(a.pending().map((p) => p.email)).toEqual(["colleague@partner.org"]);
   });
 });

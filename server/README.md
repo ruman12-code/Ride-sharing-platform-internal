@@ -22,6 +22,11 @@ Then open `http://localhost:8080`. Or just `npm start`, which does all three.
 |---|---|---|
 | `ALLOWED_EMAIL_DOMAINS` | — | **Required.** Work domains that may request access |
 | `ADMIN_EMAIL` | — | **Required.** The first administrator |
+| `AUTO_APPROVE_DOMAINS` | = allowed domains | Domains that skip the queue, **when SMTP works** |
+| `APP_URL` | `http://localhost:PORT` | Public address, used in the code email |
+| `SMTP_HOST` / `SMTP_PORT` | unset | Set to make joining automatic |
+| `SMTP_USER` / `SMTP_PASS` | unset | Omit both for an unauthenticated relay |
+| `SMTP_FROM` | unset | Required alongside `SMTP_HOST` |
 | `PORT` | `8080` | |
 | `DB_PATH` | `./carpool.db` | The whole database. Back it up by copying it |
 | `TLS_CERT` / `TLS_KEY` | unset | Certificate and key; this process terminates TLS |
@@ -75,20 +80,32 @@ Fly.io, or a machine inside the office network. One process, one file.
 
 ## Who can get in
 
-Three gates. A stranger who finds the URL gets past none of them.
+Every route starts with the email domain: only addresses on
+`ALLOWED_EMAIL_DOMAINS` may ask at all. Anything else gets
+*"Sorry! You are not in our organisation…"* and goes no further.
 
-1. **Email domain.** Only addresses on `ALLOWED_EMAIL_DOMAINS` may request
-   access. A personal Gmail address is refused at the form, with the reason
-   shown so nobody waits for an approval that will never come.
-2. **A person approves.** The request creates a *pending* user that can do
-   nothing. An administrator who recognises the name approves it.
-3. **A single-use code.** Approval issues a six-character code bound to that one
-   email, consumed on first use and expiring in seven days. Forwarding it does
-   not work.
+After that there are two paths, and which one runs depends on whether the
+server can send email.
 
-The third gate is what a shared passphrase could not give you: a passphrase
-proves somebody knows a secret; a code issued to one address and usable once
-proves it is that colleague.
+**Automatic — when SMTP is configured.** The code is emailed to the address
+that asked. Receiving it proves the mailbox belongs to whoever typed it, so no
+administrator is involved. **This is the part that makes automatic approval
+safe.** On its own a domain check is a *claim*: anybody can type
+`someone@giz.de`. Sending the code to the mailbox is what turns it into proof.
+The code is never returned to the browser — doing so would defeat the entire
+mechanism.
+
+**Manual — when SMTP is not configured.** The request waits in a queue. An
+administrator who recognises the name approves it and relays the code by hand.
+Slower, does not scale past a few dozen, and requires no email infrastructure at
+all. Perfectly workable at 150 staff.
+
+The server refuses to auto-approve without a working mailer, whatever
+`AUTO_APPROVE_DOMAINS` says. An unverified address at an allowed domain proves
+nothing.
+
+Either way the code is single-use, bound to one address, and expires in seven
+days, so a forwarded code is worthless.
 
 Codes are stored as scrypt hashes, so a copy of the database hands nobody a
 working code. Suspending someone deletes their live sessions immediately, and
