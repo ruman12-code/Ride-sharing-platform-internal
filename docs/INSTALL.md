@@ -72,7 +72,8 @@ Or explicitly:
 
 ```bash
 npm run build && npm run build:server
-PILOT_PASSPHRASE='pick-something-and-share-it' node dist-server/server/index.js
+ALLOWED_EMAIL_DOMAINS=yourcompany.org ADMIN_EMAIL=you@yourcompany.org \
+  node dist-server/server/index.js
 ```
 
 One Node process, one SQLite file, no runtime dependencies. Host it anywhere
@@ -90,15 +91,16 @@ carpool.example.org {
 ```
 
 ```bash
-TRUST_PROXY=1 PILOT_PASSPHRASE='pick-something' npm start
+TRUST_PROXY=1 ALLOWED_EMAIL_DOMAINS=yourcompany.org ADMIN_EMAIL=you@yourcompany.org npm start
 ```
 
-**One thing to be straight about when you invite people.** A shared passphrase
-plus your name is not identity — anyone with the passphrase can sign in as any
-name. Contact details are therefore never listed anywhere; they are released
-only after a driver accepts a specific rider, both ways, and every release is
-logged. Say that when you invite colleagues. People who discover later that a
-"secure" tool was not will not trust the next thing you build.
+**Access is gated in three steps**, so the URL can be public while the app is
+not: a work email domain, an administrator approving the name, and a single-use
+code issued to that one colleague. On a fresh database the server prints a
+one-time admin code for `ADMIN_EMAIL` — use it once to sign in.
+
+Full detail, including what to say to a colleague who asks about their data, is
+in [`HOSTING.md`](HOSTING.md) and [`DATA_SECURITY.md`](DATA_SECURITY.md).
 
 Full detail, including the API and backups, in
 [`server/README.md`](../server/README.md).

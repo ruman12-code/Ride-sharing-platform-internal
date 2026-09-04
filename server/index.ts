@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { readFileSync, existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { Db } from "./db.js";
 import { Api, type Session } from "./api.js";
+import { Access, parseAllowedDomains } from "./access.js";
 import { FUEL_PRICES } from "../src/adapters/local-json/seed/fuel.js";
 
 /**
@@ -50,18 +52,61 @@ const TRUST_PROXY = process.env["TRUST_PROXY"] === "1";
 const OWN_TLS = Boolean(TLS_CERT && TLS_KEY);
 const SECURE = OWN_TLS || TRUST_PROXY;
 
-const PASSPHRASE = process.env["PILOT_PASSPHRASE"];
-if (!PASSPHRASE) {
+/**
+ * Who may even ask for access.
+ *
+ * With no allowed domains the server refuses to start rather than defaulting to
+ * "anyone", because the failure mode of a permissive default here is a stranger
+ * inside the app and nobody noticing.
+ */
+const ALLOWED_DOMAINS = parseAllowedDomains(process.env["ALLOWED_EMAIL_DOMAINS"]);
+if (ALLOWED_DOMAINS.length === 0) {
   console.error(
-    "PILOT_PASSPHRASE is not set.\n" +
-      "Refusing to start: without it anyone who finds the URL can post as a colleague.\n" +
-      "  PILOT_PASSPHRASE='something-you-share-with-the-team' node server/index.js",
+    "ALLOWED_EMAIL_DOMAINS is not set.\n" +
+      "Refusing to start: without it there is nothing stopping any email address\n" +
+      "from requesting access.\n" +
+      "  ALLOWED_EMAIL_DOMAINS='yourcompany.org' node dist-server/server/index.js",
+  );
+  process.exit(1);
+}
+
+/** The first administrator, who approves everybody else. */
+const ADMIN_EMAIL = (process.env["ADMIN_EMAIL"] ?? "").trim().toLowerCase();
+if (!ADMIN_EMAIL) {
+  console.error(
+    "ADMIN_EMAIL is not set.\n" +
+      "Refusing to start: somebody has to be able to approve the first request.\n" +
+      "  ADMIN_EMAIL='you@yourcompany.org' node dist-server/server/index.js",
   );
   process.exit(1);
 }
 
 const db = new Db(DB_PATH);
-const api = new Api(db, PASSPHRASE);
+const api = new Api(db);
+// Salts the hashed addresses used for rate limiting. Regenerated on restart:
+// the counter is a rate limit, not a log, so losing it is correct.
+const access = new Access(db, ALLOWED_DOMAINS, randomUUID());
+
+// Seed the administrator, approved and with a code, so there is a way in on a
+// brand-new database.
+{
+  const existing = db.get<{ id: string; status: string }>(
+    "SELECT id, status FROM users WHERE email = ?",
+    ADMIN_EMAIL,
+  );
+  if (!existing) {
+    const id = randomUUID();
+    db.run(
+      `INSERT INTO users (id, displayName, email, role, status, createdAt)
+       VALUES (?, ?, ?, 'admin', 'pending', ?)`,
+      id, ADMIN_EMAIL.split("@")[0], ADMIN_EMAIL, new Date().toISOString(),
+    );
+    const issued = access.approve(id, "system");
+    console.log("");
+    console.log(`  ADMIN CODE for ${ADMIN_EMAIL}: ${issued?.code}`);
+    console.log("  Use it once to sign in. It is not stored and will not be shown again.");
+  }
+}
 
 // Seed the dated fuel prices once, so cost shares are computable on first run.
 for (const p of FUEL_PRICES) {
@@ -136,21 +181,33 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
       if (url.pathname.startsWith("/api/")) {
         const session: Session | undefined = api.sessionFor(cookie(req));
 
+        // Open endpoints: asking for access, and redeeming a code.
+        if (url.pathname === "/api/request-access" && req.method === "POST") {
+          const b = await body(req);
+          const ip =
+            (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
+            req.socket.remoteAddress ??
+            "unknown";
+          return send(200, access.request(String(b["email"] ?? ""), String(b["displayName"] ?? ""), ip));
+        }
+
         if (url.pathname === "/api/sign-in" && req.method === "POST") {
           const b = await body(req);
-          const s = api.signIn(
-            String(b["email"] ?? ""),
-            String(b["displayName"] ?? ""),
-            String(b["passphrase"] ?? ""),
-          );
-          if (!s) return send(401, { error: "Wrong passphrase, or that email doesn't look right." });
-          const token = api.createSession(s.userId);
+          const userId = access.redeem(String(b["email"] ?? ""), String(b["code"] ?? ""));
+          // One message for every failure. Distinguishing "not approved" from
+          // "wrong code" would turn this into a way of finding out who works here.
+          if (!userId) {
+            return send(401, {
+              error: "That code is not valid. Ask the administrator for a new one.",
+            });
+          }
+          const token = api.createSession(userId);
           res.setHeader(
             "set-cookie",
             `cp=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 3600}` +
               (SECURE ? "; Secure" : ""),
           );
-          return send(200, s);
+          return send(200, api.sessionFor(token));
         }
 
         if (url.pathname === "/api/me") {
@@ -182,6 +239,38 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         if (url.pathname === "/api/zero-result" && req.method === "POST") {
           api.recordZeroResult(session, (await body(req)) as never);
           return send(204, null);
+        }
+        if (url.pathname === "/api/contact" && req.method === "PUT") {
+          const b = await body(req);
+          api.setContact(session.userId, String(b["kind"] ?? "phone"), String(b["value"] ?? ""));
+          return send(200, { ok: true });
+        }
+        if (url.pathname === "/api/contact" && req.method === "POST") {
+          const b = await body(req);
+          const revealed = api.revealContact(session, String(b["bookingId"] ?? ""));
+          return revealed
+            ? send(200, revealed)
+            : send(403, { error: "Contact details are shared once a driver accepts." });
+        }
+
+        // Admin only, checked on the server. A client cannot ask its way in.
+        if (url.pathname.startsWith("/api/admin/")) {
+          if (session.role !== "admin") return send(403, { error: "Not an administrator." });
+          if (url.pathname === "/api/admin/pending" && req.method === "GET") {
+            return send(200, { pending: access.pending() });
+          }
+          if (url.pathname === "/api/admin/approve" && req.method === "POST") {
+            const b = await body(req);
+            const issued = access.approve(String(b["userId"] ?? ""), session.userId);
+            return issued
+              ? send(200, issued)
+              : send(404, { error: "No such request." });
+          }
+          if (url.pathname === "/api/admin/suspend" && req.method === "POST") {
+            const b = await body(req);
+            access.suspend(String(b["userId"] ?? ""), session.userId);
+            return send(200, { ok: true });
+          }
         }
         return send(404, { error: "No such endpoint." });
       }
@@ -226,7 +315,8 @@ server.listen(PORT, HOST, () => {
   console.log(`Ekpothe — pilot server`);
   console.log(`  ${scheme}://${HOST === "0.0.0.0" ? "0.0.0.0" : "localhost"}:${PORT}`);
   console.log(`  database:   ${DB_PATH}`);
-  console.log(`  passphrase: set (${PASSPHRASE.length} characters)`);
+  console.log(`  domains:    ${ALLOWED_DOMAINS.map((d) => `@${d}`).join(", ")}`);
+  console.log(`  admin:      ${ADMIN_EMAIL}`);
   if (OWN_TLS) {
     console.log(`  TLS:        this process, from TLS_CERT and TLS_KEY`);
   } else if (TRUST_PROXY) {

@@ -200,6 +200,27 @@ export const STRINGS = {
   fri: { en: "Fri", bn: "শুক্র" },
   sat: { en: "Sat", bn: "শনি" },
 
+  // Access
+  signIn: { en: "Sign in", bn: "সাইন ইন" },
+  workEmail: { en: "Work email", bn: "অফিসের ইমেইল" },
+  yourName: { en: "Your name", bn: "আপনার নাম" },
+  accessCode: { en: "Your code", bn: "আপনার কোড" },
+  requestAccess: { en: "Request access", bn: "অ্যাক্সেস চান" },
+  haveACode: { en: "I have a code", bn: "আমার কোড আছে" },
+  needACode: { en: "I need a code", bn: "আমার কোড দরকার" },
+  accessExplainer: {
+    en: "Ekpothe is for colleagues only. Ask for access with your work email, and you'll be sent a code once it's approved.",
+    bn: "একপথে শুধু সহকর্মীদের জন্য। অফিসের ইমেইল দিয়ে অ্যাক্সেস চান, অনুমোদনের পর কোড পাবেন।",
+  },
+  pendingApprovals: { en: "Waiting for approval", bn: "অনুমোদনের অপেক্ষায়" },
+  approve: { en: "Approve", bn: "অনুমোদন" },
+  codeIssued: { en: "Send them this code", bn: "এই কোডটি পাঠান" },
+  codeOnce: {
+    en: "Shown once. It is not stored and cannot be shown again.",
+    bn: "একবারই দেখানো হয়। সংরক্ষণ করা হয় না, আবার দেখা যাবে না।",
+  },
+  noPending: { en: "Nobody is waiting.", bn: "কেউ অপেক্ষা করছেন না।" },
+
   // Admin
   admin: { en: "Admin", bn: "অ্যাডমিন" },
 

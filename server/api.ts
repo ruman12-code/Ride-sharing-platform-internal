@@ -1,10 +1,12 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Db } from "./db.js";
 import { newId } from "./db.js";
 import { computeSeatsAvailable, validateBooking, validatePublish } from "../src/domain/policy/invariants.js";
 import type { Booking } from "../src/domain/entities/booking.js";
 import type { Ride } from "../src/domain/entities/ride.js";
 import type { User } from "../src/domain/entities/user.js";
+import { contactCounterparty } from "../src/domain/policy/contact-exchange.js";
+import type { Id } from "../src/domain/types.js";
 
 /**
  * The pilot API.
@@ -50,45 +52,13 @@ const toRide = (r: RideRow): Ride => ({
 });
 
 export class Api {
-  constructor(
-    private readonly db: Db,
-    private readonly passphrase: string,
-  ) {}
+  constructor(private readonly db: Db) {}
 
   // --- auth -------------------------------------------------------------
   //
-  // Pilot-grade and documented as such in server/README.md. A shared
-  // passphrase plus choosing your name is NOT identity: it proves somebody
-  // knows the passphrase, not who they are. It is appropriate for a voluntary
-  // trial among colleagues and is the reason the pilot holds no phone numbers.
-  // Real deployment replaces this wholesale with Entra ID.
-
-  signIn(email: string, displayName: string, passphrase: string): Session | undefined {
-    const given = Buffer.from(passphrase);
-    const want = Buffer.from(this.passphrase);
-    if (given.length !== want.length || !timingSafeEqual(given, want)) return undefined;
-
-    const normalised = email.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalised)) return undefined;
-
-    let user = this.db.get<User & { id: string }>(
-      "SELECT * FROM users WHERE email = ?",
-      normalised,
-    );
-    if (!user) {
-      const id = newId();
-      this.db.run(
-        `INSERT INTO users (id, displayName, email, role, createdAt)
-         VALUES (?, ?, ?, 'member', ?)`,
-        id,
-        displayName.trim().slice(0, 80) || normalised.split("@")[0],
-        normalised,
-        new Date().toISOString(),
-      );
-      user = this.db.get<User & { id: string }>("SELECT * FROM users WHERE id = ?", id)!;
-    }
-    return { userId: user.id, displayName: user.displayName, role: user.role };
-  }
+  // Sign-in is not open. A colleague requests access with a work email, an
+  // administrator who recognises the name approves them, and a single-use code
+  // is issued to that one person. See server/access.ts for the three gates.
 
   createSession(userId: string): string {
     const token = randomUUID() + randomUUID();
@@ -110,9 +80,58 @@ export class Api {
       token,
     );
     if (!row || row.expiresAt < new Date().toISOString()) return undefined;
-    const user = this.db.get<User>("SELECT * FROM users WHERE id = ?", row.userId);
-    if (!user) return undefined;
+    const user = this.db.get<User & { status: string }>(
+      "SELECT * FROM users WHERE id = ?",
+      row.userId,
+    );
+    // Status is re-checked on every request, not only at sign-in. Suspending
+    // somebody has to take effect now, and a session issued before they were
+    // suspended must stop working the moment it is used.
+    if (!user || user.status !== "approved" || user.isSuspended) return undefined;
     return { userId: user.id, displayName: user.displayName, role: user.role };
+  }
+
+  /** The contact details a colleague has chosen to share, if any. */
+  setContact(userId: Id, kind: string, value: string): void {
+    this.db.run(
+      "UPDATE users SET contactKind = ?, contactValue = ? WHERE id = ?",
+      kind,
+      value.trim().slice(0, 60),
+      userId,
+    );
+  }
+
+  /**
+   * Release a counterparty's contact details on a confirmed booking.
+   *
+   * Returns undefined for anybody who is not the driver or the rider on that
+   * booking, and for any booking the driver has not yet accepted. Each release
+   * is written to `contact_reveals`, so "who has my number?" has an answer.
+   */
+  revealContact(
+    session: Session,
+    bookingId: Id,
+  ): { readonly name: string; readonly kind: string; readonly value: string } | undefined {
+    const booking = this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
+    if (!booking) return undefined;
+    const ride = this.getRide(booking.rideId);
+    if (!ride) return undefined;
+
+    const subjectId = contactCounterparty(booking, ride.driverId, session.userId);
+    if (!subjectId) return undefined;
+
+    const subject = this.db.get<{ displayName: string; contactKind: string | null; contactValue: string | null }>(
+      "SELECT displayName, contactKind, contactValue FROM users WHERE id = ?",
+      subjectId,
+    );
+    if (!subject?.contactKind || !subject.contactValue) return undefined;
+
+    this.db.run(
+      "INSERT INTO contact_reveals (id, bookingId, viewerId, subjectId, at) VALUES (?, ?, ?, ?, ?)",
+      randomUUID(), bookingId, session.userId, subjectId, new Date().toISOString(),
+    );
+    this.db.audit(session.userId, "contact", subjectId, "reveal");
+    return { name: subject.displayName, kind: subject.contactKind, value: subject.contactValue };
   }
 
   // --- rides ------------------------------------------------------------

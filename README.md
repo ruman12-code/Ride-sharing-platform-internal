@@ -50,6 +50,8 @@ Read [`docs/LEGACY_AUDIT.md`](docs/LEGACY_AUDIT.md) before changing anything.
 | [`docs/ADR-002-routing.md`](docs/ADR-002-routing.md) | Computed routing, and why Google Maps is built but disabled |
 | [`docs/ADR-003-name-and-attribution.md`](docs/ADR-003-name-and-attribution.md) | The name, and the acrostic |
 | [`server/README.md`](server/README.md) | The pilot server — running it without SharePoint |
+| [`docs/HOSTING.md`](docs/HOSTING.md) | Getting it online with HTTPS, from scratch |
+| [`docs/DATA_SECURITY.md`](docs/DATA_SECURITY.md) | What happens to colleagues' data — written to hand over |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | How to run it, and what does not work yet |
 | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | For colleagues and administrators |
 | [`docs/DPIA.md`](docs/DPIA.md) | Data protection impact assessment — **unsigned** |

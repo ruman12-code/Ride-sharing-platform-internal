@@ -1,10 +1,36 @@
-import { DatabaseSync } from "node:sqlite";
+import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * `node:sqlite` is loaded through createRequire rather than a static import.
+ *
+ * It is a Node 22 builtin, and the bundlers in this toolchain predate it: they
+ * strip the `node:` prefix and then fail to resolve a package called "sqlite",
+ * which stops the server tests loading at all. createRequire hands the
+ * specifier straight to Node, which has always known what it is.
+ *
+ * Nothing else about the module changes; this is a loader workaround, not a
+ * design choice.
+ */
+interface SqliteModule {
+  new (path: string): {
+    exec(sql: string): void;
+    prepare(sql: string): {
+      all(...params: unknown[]): unknown[];
+      get(...params: unknown[]): unknown;
+      run(...params: unknown[]): { changes: number | bigint };
+    };
+    close(): void;
+  };
+}
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
+  DatabaseSync: SqliteModule;
+};
 
 /**
  * SQLite store for the standalone pilot.
@@ -21,7 +47,7 @@ const here = dirname(fileURLToPath(import.meta.url));
  * what the legacy `lastRow + 1` handler did.
  */
 export class Db {
-  private readonly db: DatabaseSync;
+  private readonly db: InstanceType<SqliteModule>;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);

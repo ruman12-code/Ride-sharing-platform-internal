@@ -18,8 +18,16 @@ CREATE TABLE IF NOT EXISTS users (
   email            TEXT NOT NULL UNIQUE,
   department       TEXT NOT NULL DEFAULT '',
   officeLocation   TEXT NOT NULL DEFAULT '',
-  -- Not collected in pilot mode. See server/README.md: the pilot has no
-  -- organisational identity provider, so it does not hold phone numbers.
+  -- Access state. Nobody reaches the app on 'pending': a colleague asks, an
+  -- administrator who recognises the name approves, and only then is a code
+  -- issued. A stranger who finds the URL gets no further than the request form.
+  status           TEXT NOT NULL DEFAULT 'pending',
+  approvedBy       TEXT,
+  approvedAt       TEXT,
+  -- How a colleague is reached once a driver has accepted them. Never listed,
+  -- never searchable, never exported. See domain/policy/contact-exchange.ts.
+  contactKind      TEXT,
+  contactValue     TEXT,
   phone            TEXT,
   photoUrl         TEXT,
   role             TEXT NOT NULL DEFAULT 'member',
@@ -181,6 +189,45 @@ CREATE TABLE IF NOT EXISTS consents (
   scopes        TEXT NOT NULL DEFAULT '[]',
   withdrawnAt   TEXT,
   PRIMARY KEY (userId, policyVersion)
+);
+
+-- Single-use invite codes.
+--
+-- Issued by an administrator to one named colleague after approving them, and
+-- consumed on first use. This is what binds a session to a person: a shared
+-- passphrase proves somebody knows a secret, whereas a code issued to one email
+-- and usable once proves it is that colleague.
+--
+-- Stored as a scrypt hash. A copy of the database therefore does not hand
+-- anybody a working code.
+CREATE TABLE IF NOT EXISTS invite_codes (
+  id        TEXT PRIMARY KEY,
+  userId    TEXT NOT NULL REFERENCES users(id),
+  codeHash  TEXT NOT NULL,
+  salt      TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  expiresAt TEXT NOT NULL,
+  usedAt    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_invite_user ON invite_codes(userId);
+
+-- Rate limiting for the public request form, so a stranger who finds the URL
+-- cannot fill the pending queue with noise.
+CREATE TABLE IF NOT EXISTS request_attempts (
+  id        TEXT PRIMARY KEY,
+  ipHash    TEXT NOT NULL,
+  at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attempts_at ON request_attempts(at);
+
+-- Every release of a colleague's contact details, so "who has my number?" has
+-- an answer rather than an assumption.
+CREATE TABLE IF NOT EXISTS contact_reveals (
+  id        TEXT PRIMARY KEY,
+  bookingId TEXT NOT NULL,
+  viewerId  TEXT NOT NULL,
+  subjectId TEXT NOT NULL,
+  at        TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

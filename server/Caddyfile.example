@@ -14,4 +14,4 @@ carpool.example.org {
 # Then run the app knowing TLS is handled upstream, so it binds to the network
 # and marks its session cookie Secure:
 #
-#   TRUST_PROXY=1 PILOT_PASSPHRASE='...' npm start
+#   TRUST_PROXY=1 ALLOWED_EMAIL_DOMAINS=yourcompany.org ADMIN_EMAIL=you@... npm start

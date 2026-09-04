@@ -12,14 +12,16 @@ built-in `node:sqlite` does the storage.
 npm install
 npm run build            # the browser app
 npm run build:server     # the server
-PILOT_PASSPHRASE='pick-something-and-share-it' node dist-server/server/index.js
+ALLOWED_EMAIL_DOMAINS=yourcompany.org ADMIN_EMAIL=you@yourcompany.org \
+  node dist-server/server/index.js
 ```
 
 Then open `http://localhost:8080`. Or just `npm start`, which does all three.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PILOT_PASSPHRASE` | — | **Required.** The server refuses to start without it |
+| `ALLOWED_EMAIL_DOMAINS` | — | **Required.** Work domains that may request access |
+| `ADMIN_EMAIL` | — | **Required.** The first administrator |
 | `PORT` | `8080` | |
 | `DB_PATH` | `./carpool.db` | The whole database. Back it up by copying it |
 | `TLS_CERT` / `TLS_KEY` | unset | Certificate and key; this process terminates TLS |
@@ -41,7 +43,7 @@ in [`Caddyfile.example`](Caddyfile.example); Caddy obtains and renews a Let's
 Encrypt certificate itself.
 
 ```bash
-TRUST_PROXY=1 PILOT_PASSPHRASE='...' npm start
+TRUST_PROXY=1 ALLOWED_EMAIL_DOMAINS=yourcompany.org ADMIN_EMAIL=you@... npm start
 ```
 
 **B. This process terminates TLS.**
@@ -50,7 +52,7 @@ TRUST_PROXY=1 PILOT_PASSPHRASE='...' npm start
 TLS_CERT=/etc/letsencrypt/live/you/fullchain.pem \
 TLS_KEY=/etc/letsencrypt/live/you/privkey.pem \
 REDIRECT_PORT=80 \
-PILOT_PASSPHRASE='...' npm start
+ALLOWED_EMAIL_DOMAINS=yourcompany.org ADMIN_EMAIL=you@... npm start
 ```
 
 `REDIRECT_PORT` runs a plain-HTTP listener that 301s to HTTPS — worth setting,
@@ -71,37 +73,47 @@ handler added later cannot quietly omit them.
 Anything that runs Node and gives you a URL: a small VPS, Render, Railway,
 Fly.io, or a machine inside the office network. One process, one file.
 
-## What the pilot's sign-in actually is — read this
+## Who can get in
 
-A shared passphrase plus your name and email. **That is not identity.** It proves
-somebody knows the passphrase; it does not prove who they are. Anyone with the
-passphrase can sign in as any name and any email.
+Three gates. A stranger who finds the URL gets past none of them.
 
-This is a deliberate trade for a voluntary trial among colleagues who already
-know each other, and it has consequences that are designed around rather than
-ignored:
+1. **Email domain.** Only addresses on `ALLOWED_EMAIL_DOMAINS` may request
+   access. A personal Gmail address is refused at the form, with the reason
+   shown so nobody waits for an approval that will never come.
+2. **A person approves.** The request creates a *pending* user that can do
+   nothing. An administrator who recognises the name approves it.
+3. **A single-use code.** Approval issues a six-character code bound to that one
+   email, consumed on first use and expiring in seven days. Forwarding it does
+   not work.
 
-- **Contact details are exchanged, never listed.** A colleague's number is
-  released only once a driver has *accepted* a specific rider — both ways, so
-  each can say "I'm at the gate" and "two minutes away". It appears in no
-  listing, no search and no export, and every release is written to the audit
-  log. The driver holds the gate: a request they decline discloses nothing, and
-  declining is silent.
+The third gate is what a shared passphrase could not give you: a passphrase
+proves somebody knows a secret; a code issued to one address and usable once
+proves it is that colleague.
 
-  This is the difference that matters under a shared passphrase. A browsable
-  directory of numbers would be harvestable by anyone who knew the passphrase —
-  the legacy workbook's worst privacy defect rebuilt as a feature. An exchange
-  cannot be harvested without a named driver agreeing, one rider at a time.
-- **Do not use it for anything you would mind a colleague reading.**
-- **Change the passphrase when someone leaves**, and tell people you did.
-- Treat every posting as informal. This is a trial of whether the idea works,
-  not a system of record.
+Codes are stored as scrypt hashes, so a copy of the database hands nobody a
+working code. Suspending someone deletes their live sessions immediately, and
+status is re-checked on every request rather than only at sign-in.
 
-Say all of that to colleagues when you invite them. People who find out later
-that a "secure" tool was not stop trusting the next one you build.
+### Required environment
 
-Real deployment replaces this entirely with Entra ID, at which point sign-in
-becomes the Teams session they already have and none of the above applies.
+```bash
+ALLOWED_EMAIL_DOMAINS=yourcompany.org   # comma-separated for more than one
+ADMIN_EMAIL=you@yourcompany.org         # the first administrator
+```
+
+The server **refuses to start** without either. A permissive default on the
+first would put a stranger inside the app with nobody noticing; without the
+second there would be no one to approve the first request.
+
+On a fresh database the server prints a one-time **admin code** for
+`ADMIN_EMAIL`. Use it once to sign in. It is not stored and is not shown again.
+
+### The honest limitation
+
+Anyone who obtains a colleague's code *before they use it* could sign in as
+them. That is why codes are sent privately, expire in seven days, and die on
+first use. It is a real risk, smaller than it sounds, and not zero — say so when
+you invite people.
 
 ## What it does enforce properly
 
@@ -128,7 +140,13 @@ All JSON, session cookie `cp`.
 
 | Method | Path | |
 |---|---|---|
-| `POST` | `/api/sign-in` | `{email, displayName, passphrase}` → sets the cookie |
+| `POST` | `/api/request-access` | `{email, displayName}` → pending. Open |
+| `POST` | `/api/sign-in` | `{email, code}` → sets the cookie. Open |
+| `GET` | `/api/admin/pending` | Requests awaiting approval. Admin only |
+| `POST` | `/api/admin/approve` | `{userId}` → returns the code, once. Admin only |
+| `POST` | `/api/admin/suspend` | `{userId}`. Admin only |
+| `PUT` | `/api/contact` | Set your own contact detail |
+| `POST` | `/api/contact` | `{bookingId}` → a counterparty's detail, if allowed |
 | `GET` | `/api/me` | Current session, or `401` |
 | `GET` | `/api/rides` | Published and full rides |
 | `POST` | `/api/rides` | Publish. `400` if a domain rule rejects it |
