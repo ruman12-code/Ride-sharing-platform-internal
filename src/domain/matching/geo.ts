@@ -46,6 +46,19 @@ export const NEIGHBOUR_RADIUS_KM = 5;
 /** Every zone links to at least this many nearest neighbours, so the graph connects. */
 export const MIN_NEIGHBOURS = 4;
 
+type Quadrant = "NE" | "NW" | "SE" | "SW";
+const QUADRANTS: readonly Quadrant[] = ["NE", "NW", "SE", "SW"];
+
+/** Which way `to` lies from `from`, so the graph can link out of a cluster. */
+const quadrantOf = (
+  from: { readonly lat: number; readonly lng: number },
+  to: { readonly lat: number; readonly lng: number },
+): Quadrant => {
+  const north = to.lat >= from.lat;
+  const east = to.lng >= from.lng;
+  return north ? (east ? "NE" : "NW") : east ? "SE" : "SW";
+};
+
 export interface RouteLeg {
   readonly fromZoneId: Id;
   readonly toZoneId: Id;
@@ -99,7 +112,11 @@ export class ZoneGraph {
     for (const from of zones) {
       const ranked = zones
         .filter((z) => z.id !== from.id)
-        .map((to) => ({ to: to.id, km: haversineKm(from, to) }))
+        .map((to) => ({
+          to: to.id,
+          km: haversineKm(from, to),
+          quadrant: quadrantOf(from, to),
+        }))
         .sort((a, b) => a.km - b.km);
 
       // Everything within the radius, and always at least MIN_NEIGHBOURS, so an
@@ -107,6 +124,22 @@ export class ZoneGraph {
       const near = ranked.filter((r) => r.km <= NEIGHBOUR_RADIUS_KM);
       const links = near.length >= MIN_NEIGHBOURS ? near : ranked.slice(0, MIN_NEIGHBOURS);
       for (const edge of links) link(from.id, edge.to, edge.km);
+
+      // Then the nearest neighbour in each compass quadrant, however far.
+      //
+      // Without this a pure proximity graph traps you inside dense clusters.
+      // Every place in Uttara is within a few kilometres of every other, while
+      // the nearest zone westward (Mirpur-12) is 6.4 km away — outside the
+      // radius. The result was that no route from anywhere in Uttara could
+      // reach Mirpur without first travelling south-east to Jashim Uddin and
+      // doubling back, which is not a road anybody drives.
+      //
+      // One link per direction is enough to give the graph a way out of a
+      // cluster, and cheap: at most four extra edges per zone.
+      for (const q of QUADRANTS) {
+        const nearestThatWay = ranked.find((r) => r.quadrant === q);
+        if (nearestThatWay) link(from.id, nearestThatWay.to, nearestThatWay.km);
+      }
     }
   }
 
@@ -177,11 +210,11 @@ export class ZoneGraph {
       legs.push({
         fromZoneId: from.id,
         toZoneId: to.id,
-        distanceKm: round1(haversineKm(from, to) * ROAD_DETOUR_FACTOR),
+        distanceKm: Math.max(MIN_LEG_KM, round1(haversineKm(from, to) * ROAD_DETOUR_FACTOR)),
       });
     }
 
-    const distanceKm = round1(legs.reduce((sum, l) => sum + l.distanceKm, 0));
+    const distanceKm = Math.max(MIN_LEG_KM, round1(legs.reduce((sum, l) => sum + l.distanceKm, 0)));
     return {
       zoneSequence,
       legs,
@@ -194,3 +227,17 @@ export class ZoneGraph {
 }
 
 export const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+/**
+ * The shortest distance a leg may report.
+ *
+ * Two seeded places can sit close enough that the rounded distance between them
+ * is zero — Mirpur-10 and its circle were 30 metres apart. A zero-kilometre
+ * route then reaches `calculateCostShare`, which correctly refuses a
+ * non-positive distance, and the whole offer flow fails on a journey that is
+ * merely very short rather than impossible.
+ *
+ * Flooring it here keeps that from being reachable at all, and 0.1 km is small
+ * enough that it cannot meaningfully distort a cost share.
+ */
+export const MIN_LEG_KM = 0.1;

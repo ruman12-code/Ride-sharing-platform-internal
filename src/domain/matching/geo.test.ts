@@ -22,6 +22,43 @@ describe("haversineKm", () => {
   });
 });
 
+describe("very short journeys", () => {
+  it("never reports a zero distance, however close two places are", () => {
+    // A zero-kilometre route reaches calculateCostShare, which correctly
+    // refuses a non-positive distance -- so the offer flow would fail on a
+    // journey that is merely short rather than impossible.
+    const routes = ZONES.flatMap((a) =>
+      ZONES.filter((b) => b.id !== a.id).map((b) => graph.route(a.id, b.id)),
+    ).filter((r): r is NonNullable<typeof r> => r !== undefined);
+    expect(routes.filter((r) => !(r.distanceKm > 0))).toEqual([]);
+    expect(routes.every((r) => r.legs.every((l) => l.distanceKm > 0))).toBe(true);
+  });
+});
+
+describe("directional connectivity", () => {
+  it("lets a route leave a dense cluster in the direction it needs", () => {
+    // Everything in Uttara is within a few km of everything else, while the
+    // nearest zone westward is 6.4 km away. Without a link per compass
+    // quadrant, no Uttara route could reach Mirpur without first travelling
+    // south-east and doubling back.
+    const west = graph.route("uttara-diabari", "mirpur-10")!;
+    expect(west.zoneSequence).not.toContain("uttara-jashimuddin");
+    expect(west.distanceKm).toBeLessThan(13);
+
+    // And an eastward journey from the same place still goes east.
+    const east = graph.route("uttara-diabari", "gulshan-2")!;
+    expect(east.zoneSequence).toContain("kuril");
+  });
+
+  it("routes landmarks in one area differently, because they are apart", () => {
+    // The reason landmarks are routing nodes rather than labels.
+    const diabari = graph.route("uttara-diabari", "gulshan-2")!;
+    const jashim = graph.route("uttara-jashimuddin", "gulshan-2")!;
+    expect(diabari.distanceKm).not.toBe(jashim.distanceKm);
+    expect(diabari.distanceKm).toBeGreaterThan(jashim.distanceKm);
+  });
+});
+
 describe("ZoneGraph routing", () => {
   it("routes between any two zones, with no corridor list involved", () => {
     // The point of removing corridors: a journey nobody anticipated works.

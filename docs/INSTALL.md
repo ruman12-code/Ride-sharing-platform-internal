@@ -79,15 +79,26 @@ One Node process, one SQLite file, no runtime dependencies. Host it anywhere
 that runs Node and gives you a URL — a small VPS, Render, Railway, Fly.io, or a
 machine on the office network.
 
-**Two things to get right before inviting anyone:**
+**TLS is enforced, not advised.** Without it the server binds to `127.0.0.1`
+only and tells you what to set. The simplest route is Caddy in front:
 
-1. **Put it behind HTTPS.** Passphrases and session cookies over plain HTTP on
-   an office network are readable by anyone on that network.
-2. **Be straight about what the sign-in is.** A shared passphrase and your name
-   is not identity — anyone with the passphrase can sign in as any name. The
-   pilot therefore holds no phone numbers, and colleagues should treat it as
-   informal. Tell them that when you invite them; people who discover later that
-   a "secure" tool was not will not trust the next thing you build.
+```bash
+# Caddyfile — see server/Caddyfile.example
+carpool.example.org {
+	reverse_proxy localhost:8080
+}
+```
+
+```bash
+TRUST_PROXY=1 PILOT_PASSPHRASE='pick-something' npm start
+```
+
+**One thing to be straight about when you invite people.** A shared passphrase
+plus your name is not identity — anyone with the passphrase can sign in as any
+name. Contact details are therefore never listed anywhere; they are released
+only after a driver accepts a specific rider, both ways, and every release is
+logged. Say that when you invite colleagues. People who discover later that a
+"secure" tool was not will not trust the next thing you build.
 
 Full detail, including the API and backups, in
 [`server/README.md`](../server/README.md).

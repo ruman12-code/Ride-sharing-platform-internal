@@ -2,6 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import type { DayOfWeek } from "../../domain/types.js";
 import type { Ride } from "../../domain/entities/ride.js";
 import type { Route } from "../../domain/matching/geo.js";
+import {
+  IN_KIND_SUGGESTIONS,
+  MAX_IN_KIND_NOTE,
+  type Contribution,
+  contributionLabel,
+  isValidContribution,
+  recommendedContribution,
+} from "../../domain/pricing/contribution.js";
+import { RouteLine, type RouteStop } from "../components/RouteLine.jsx";
 import { validatePublish } from "../../domain/policy/invariants.js";
 import { type Lang, num, t, taka } from "../i18n.js";
 import { Progress, Stepper, Toggle, ZonePicker, zoneName } from "../components/common.jsx";
@@ -18,6 +27,17 @@ import { ACTIVE_FUEL_PRICE, ME, explain, shareFor, type App } from "../store.js"
 
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 const STEP_TITLES = ["route", "when", "seatsAndCar", "costShare"] as const;
+
+/** Map a computed sequence plus the driver's chosen stops onto the transit line. */
+const routeStops = (
+  sequence: readonly string[],
+  active: readonly string[],
+): readonly RouteStop[] =>
+  sequence.map((zoneId, i) => ({
+    zoneId,
+    isEnd: i === 0 || i === sequence.length - 1,
+    active: active.includes(zoneId),
+  }));
 const WORKING_DAYS: DayOfWeek[] = [0, 1, 2, 3, 4];
 
 /** A route this driver has posted before. One tap replaces four screens. */
@@ -52,7 +72,8 @@ export const OfferFlow = ({
   const [colour, setColour] = useState("Silver");
   const [plate, setPlate] = useState("4417");
   const [prefs, setPrefs] = useState({ womenOnly: false, ac: true, luggage: false, quiet: false });
-  const [share, setShare] = useState<number | undefined>();
+  const [contribution, setContribution] = useState<Contribution | undefined>();
+  const [inKindNote, setInKindNote] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [route, setRoute] = useState<Route | undefined>();
   const [routing, setRouting] = useState(false);
@@ -123,7 +144,10 @@ export const OfferFlow = ({
     [distanceKm, seats],
   );
   const cap = breakdown?.sharePerSeat ?? 0;
-  const chosenShare = share ?? cap;
+  // Defaults to the recommended even split. Most drivers accept the default,
+  // which is exactly why the default has to be the fair one.
+  const chosen: Contribution = contribution ?? recommendedContribution(cap);
+  const chosenShare = chosen.mode === "cost_share" ? chosen.amount : 0;
 
   const applySaved = (r: SavedRoute) => {
     setOrigin(r.origin);
@@ -135,6 +159,14 @@ export const OfferFlow = ({
 
   const publish = () => {
     if (!breakdown || !origin || !destination) return;
+    if (!isValidContribution(chosen, cap)) {
+      setError(
+        lang === "en"
+          ? "Say what you'd like in return, or choose 'nothing at all'."
+          : "বিনিময়ে কী চান লিখুন, অথবা \u201cকিছুই না\u201d বেছে নিন।",
+      );
+      return;
+    }
     const departureAt = `2026-09-04T${time}:00+06:00`;
     const check = validatePublish(
       { departureAt, costSharePerSeat: chosenShare, seatsTotal: seats },
@@ -185,9 +217,12 @@ export const OfferFlow = ({
         where it cannot be missed: above the fields, on every step, never
         collapsible. It is the organisation's own wording.
       */}
-      <div className="declaration" role="note">
-        <span className="mark" aria-hidden="true">✍️</span>
-        <p>{t("declaration", lang)}</p>
+      <div className="disclaimer" role="note" aria-label={t("disclaimerHeading", lang)}>
+        <span className="mark" aria-hidden="true">⚠️</span>
+        <div>
+          <span className="head">{t("disclaimerHeading", lang)}</span>
+          <p>{t("declaration", lang)}</p>
+        </div>
       </div>
 
       <Progress step={step} total={4} lang={lang} />
@@ -234,19 +269,17 @@ export const OfferFlow = ({
               {!routing && route && !routeApproved && (
                 <>
                   <span className="label">{t("suggestedRoute", lang)}</span>
-                  <div className="routeline">
-                    <span className="routeend">{zoneName(origin, lang)}</span>
-                    {route.zoneSequence.slice(1, -1).map((zid) => (
-                      <span key={zid} className="chip via small" aria-hidden="false">
-                        {zoneName(zid, lang)}
-                      </span>
-                    ))}
-                    <span className="routeend">{zoneName(destination, lang)}</span>
-                  </div>
-                  <div className="meta">
-                    <span><strong>{num(route.distanceKm, lang)} km</strong></span>
-                    <span>~{num(route.durationMinutes, lang)} {t("minutes", lang)}</span>
-                    <span className="badge muted">
+                  <RouteLine lang={lang} stops={routeStops(route.zoneSequence, route.zoneSequence)} />
+                  <div className="routemeta">
+                    <span>
+                      <span className="big">{num(route.distanceKm, lang)}</span>{" "}
+                      <span className="unit">km</span>
+                    </span>
+                    <span>
+                      <span className="big">{num(route.durationMinutes, lang)}</span>{" "}
+                      <span className="unit">{t("minutes", lang)}</span>
+                    </span>
+                    <span className="badge muted" style={{ marginInlineStart: "auto" }}>
                       {route.isEstimate ? t("estimated", lang) : t("liveTraffic", lang)}
                     </span>
                   </div>
@@ -292,31 +325,19 @@ export const OfferFlow = ({
                     </span>
                   </div>
 
-                  <span className="label" style={{ marginTop: 16 }}>{t("pickYourStops", lang)}</span>
-                  <div className="chips" role="group" aria-label={t("pickYourStops", lang)}>
-                    {suggested.map((zid) => {
-                      const on = effectiveVia.includes(zid);
-                      return (
-                        <button
-                          key={zid}
-                          type="button"
-                          className="chip small"
-                          aria-pressed={on}
-                          onClick={() => {
-                            setViaTouched(true);
-                            setVia(
-                              on
-                                ? effectiveVia.filter((v) => v !== zid)
-                                : suggested.filter((z) => effectiveVia.includes(z) || z === zid),
-                            );
-                          }}
-                        >
-                          {zoneName(zid, lang)}
-                        </button>
+                  <span className="label" style={{ marginTop: 18 }}>{t("pickYourStops", lang)}</span>
+                  <RouteLine
+                    lang={lang}
+                    stops={routeStops(route.zoneSequence, [origin, ...effectiveVia, destination])}
+                    onToggle={(zid) => {
+                      setViaTouched(true);
+                      setVia(
+                        effectiveVia.includes(zid)
+                          ? effectiveVia.filter((v) => v !== zid)
+                          : suggested.filter((z) => effectiveVia.includes(z) || z === zid),
                       );
-                    })}
-                    {suggested.length === 0 && <span className="hint">—</span>}
-                  </div>
+                    }}
+                  />
 
                   {suggested.length > 0 && (
                     <div className="btnrow" style={{ marginTop: 10 }}>
@@ -424,22 +445,105 @@ export const OfferFlow = ({
               <div className="prov">{working.provenance}</div>
             </div>
 
-            <div style={{ marginTop: 16 }}>
-              <span className="label">
-                {taka(chosenShare, lang)} {t("perSeat", lang)}
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={cap}
-                step={10}
-                value={chosenShare}
-                onChange={(e) => setShare(Number(e.target.value))}
-                aria-label={t("costShare", lang)}
-                style={{ width: "100%", minHeight: 44 }}
-              />
-              <p className="hint">{t("youMayLower", lang)}</p>
-              <p className="hint"><strong>{t("capNotice", lang)}</strong> {taka(cap, lang)}</p>
+            {/*
+              The system always works out an even fuel share and always shows
+              it. What it does not do is insist. A colleague giving another
+              colleague a lift may want the fuel, may prefer a coffee, or may
+              want nothing — and forcing the first turns a favour into a
+              transaction. The calculated share stays the ceiling in every mode.
+            */}
+            <div style={{ marginTop: 18 }}>
+              <span className="label">{t("whatDoYouAsk", lang)}</span>
+              <div className="chips" role="group" aria-label={t("whatDoYouAsk", lang)}>
+                <button
+                  type="button"
+                  className="chip"
+                  aria-pressed={chosen.mode === "cost_share"}
+                  onClick={() => setContribution(recommendedContribution(cap))}
+                >
+                  {t("modeCostShare", lang)}
+                </button>
+                <button
+                  type="button"
+                  className="chip"
+                  aria-pressed={chosen.mode === "in_kind"}
+                  onClick={() =>
+                    setContribution({
+                      mode: "in_kind",
+                      amount: 0,
+                      inKindNote: inKindNote || IN_KIND_SUGGESTIONS[0]!,
+                    })
+                  }
+                >
+                  {t("modeInKind", lang)}
+                </button>
+                <button
+                  type="button"
+                  className="chip"
+                  aria-pressed={chosen.mode === "nothing"}
+                  onClick={() => setContribution({ mode: "nothing", amount: 0 })}
+                >
+                  {t("modeNothing", lang)}
+                </button>
+              </div>
+              <p className="hint">{t("contributionHint", lang)}</p>
+
+              {chosen.mode === "cost_share" && (
+                <div style={{ marginTop: 14 }}>
+                  <span className="label">
+                    {taka(chosenShare, lang)} {t("perSeat", lang)}
+                    <span className="badge exact_route" style={{ marginInlineStart: 8 }}>
+                      {t("recommended", lang)}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={cap}
+                    step={10}
+                    value={chosenShare}
+                    onChange={(e) =>
+                      setContribution({ mode: "cost_share", amount: Number(e.target.value) })
+                    }
+                    aria-label={t("costShare", lang)}
+                  />
+                  <p className="hint">{t("youMayLower", lang)}</p>
+                  <p className="hint"><strong>{t("capNotice", lang)}</strong> {taka(cap, lang)}</p>
+                </div>
+              )}
+
+              {chosen.mode === "in_kind" && (
+                <div style={{ marginTop: 14 }}>
+                  <div className="chips">
+                    {IN_KIND_SUGGESTIONS.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        className="chip small"
+                        aria-pressed={chosen.inKindNote === suggestion}
+                        onClick={() => {
+                          setInKindNote(suggestion);
+                          setContribution({ mode: "in_kind", amount: 0, inKindNote: suggestion });
+                        }}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    className="input"
+                    style={{ marginTop: 10 }}
+                    maxLength={MAX_IN_KIND_NOTE}
+                    value={inKindNote}
+                    placeholder={t("inKindPlaceholder", lang)}
+                    aria-label={t("modeInKind", lang)}
+                    onChange={(e) => {
+                      setInKindNote(e.target.value);
+                      setContribution({ mode: "in_kind", amount: 0, inKindNote: e.target.value });
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
@@ -451,7 +555,10 @@ export const OfferFlow = ({
             <div className="meta">
               <span>{num(time, lang)}</span>
               <span>{num(seats, lang)} {t(seats === 1 ? "seatLeft" : "seatsLeft", lang).replace(/ left| বাকি/, "")}</span>
-              <span>{taka(chosenShare, lang)} {t("perSeat", lang)}</span>
+              {/* Rendered through contributionLabel so a coffee never appears
+                  as "Tk 0" — a zero price is still a price, and it frames a
+                  favour as a transaction that happens to cost nothing. */}
+              <span>{contributionLabel(chosen, lang)}</span>
             </div>
             {effectiveVia.length > 0 && (
               <div className="meta">

@@ -30,6 +30,21 @@ export interface Zone {
    * colleagues' habits both land on the right zone.
    */
   readonly aliases: readonly string[];
+  /**
+   * The broader area this place sits inside, if any.
+   *
+   * Purely a grouping for the picker: choosing "Uttara" then narrowing to
+   * "Diabari" is two short lists instead of one long one. It has no effect on
+   * routing — every zone, parent or child, is its own node in the graph.
+   *
+   * That distinction is the point. Uttara Diabari and Uttara Jashim Uddin are
+   * about four kilometres apart and do not take the same road to Gulshan, so
+   * treating them as one origin would compute a route neither driver actually
+   * drives. They are separate places that happen to share a name.
+   */
+  readonly parentId?: Id;
+  /** True when this is a recognised landmark rather than a general area. */
+  readonly isLandmark?: boolean;
 }
 
 /** Resolve a free-text spelling to a zone. Used by migration and search only. */

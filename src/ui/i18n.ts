@@ -92,6 +92,25 @@ export const STRINGS = {
     en: "You are entering your Ride sharing information by yourself, voluntarily",
     bn: "আপনি নিজের ইচ্ছায়, স্বেচ্ছায় আপনার রাইড শেয়ারিং তথ্য দিচ্ছেন",
   },
+  disclaimerHeading: { en: "Disclaimer", bn: "দাবিত্যাগ" },
+
+  // Contribution — what, if anything, the rider gives the driver
+  whatDoYouAsk: { en: "What would you like in return?", bn: "বিনিময়ে কী চান?" },
+  contributionHint: {
+    en: "Entirely your call. Most drivers take the fuel share, but a coffee or nothing at all are perfectly good answers.",
+    bn: "পুরোপুরি আপনার সিদ্ধান্ত। বেশিরভাগ চালক জ্বালানির ভাগ নেন, তবে এক কাপ কফি বা কিছুই না — দুটোই ঠিক আছে।",
+  },
+  modeCostShare: { en: "Share the fuel", bn: "জ্বালানির খরচ ভাগ" },
+  modeInKind: { en: "Something small", bn: "ছোট কিছু" },
+  modeNothing: { en: "Nothing at all", bn: "কিছুই না" },
+  recommended: { en: "Recommended", bn: "প্রস্তাবিত" },
+  inKindPlaceholder: { en: "e.g. a coffee", bn: "যেমন এক কাপ কফি" },
+
+  // Contact exchange
+  contactLabel: { en: "How can a colleague reach you?", bn: "সহকর্মী কীভাবে যোগাযোগ করবেন?" },
+  contactHidden: { en: "Hidden until you accept", bn: "গ্রহণ করার আগ পর্যন্ত লুকানো" },
+  contactShown: { en: "Shared with you", bn: "আপনার সঙ্গে শেয়ার করা হয়েছে" },
+  callThem: { en: "Call", bn: "ফোন" },
 
   repeatWeekly: { en: "Repeat weekly", bn: "সাপ্তাহিক পুনরাবৃত্তি" },
   repeatWeeklyHint: {

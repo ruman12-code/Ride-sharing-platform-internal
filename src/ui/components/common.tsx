@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { type Lang, num, t, type StringKey } from "../i18n.js";
-import { ZONES } from "../store.js";
+import { AREAS, ZONES, landmarksIn } from "../../adapters/local-json/seed/zones.js";
 
 export const zoneName = (id: string, lang: Lang): string => {
   const z = ZONES.find((zone) => zone.id === id);
@@ -30,54 +30,60 @@ export const Progress = ({ step, total, lang }: { step: number; total: number; l
 );
 
 /**
- * A zone picker: type to narrow, tap to choose.
+ * A zone picker: choose the area, then the exact place.
  *
- * Still a closed set. The text box **filters** the seeded zones; it never
- * creates one, and nothing free-text is ever stored. That distinction is the
- * whole lesson of the legacy workbook, where free entry produced four spellings
- * of one destination from one person in five months (LEGACY_AUDIT.md D-04).
+ * Two short lists instead of one long one — and more importantly, the second
+ * step is not cosmetic. Uttara Diabari and Uttara Jashim Uddin are about four
+ * kilometres apart and do not take the same road to Gulshan, so "Uttara" alone
+ * would compute a route neither driver drives and price the trip from it. The
+ * landmark is a real routing node; picking one is picking a different journey.
  *
- * The filter exists because the list is now the full zone set. With corridors
- * removed there is no natural ordering to shorten it, and 45 chips rendered
- * twice made the route screen nearly 6,000px tall on a 360px phone — which is
- * its own kind of friction, and the exact thing this product exists to remove.
+ * Still a closed set throughout. The text box **filters** seeded places and
+ * never creates one — free entry is what produced four spellings of a single
+ * destination from one colleague in the legacy workbook (LEGACY_AUDIT.md D-04).
  */
 export const ZonePicker = ({
-  value, onChange, lang, exclude, label, recent = [],
+  value, onChange, lang, exclude, label,
 }: {
   value: string | undefined;
   onChange: (id: string) => void;
   lang: Lang;
   exclude?: string | undefined;
   label: string;
-  recent?: readonly string[];
 }) => {
   const [filter, setFilter] = useState("");
+  const [area, setArea] = useState<string | undefined>();
   const inputId = `zone-${label.replace(/\s+/g, "-").toLowerCase()}`;
 
-  const available = ZONES.filter((z) => z.id !== exclude);
   const needle = filter.trim().toLowerCase();
-
-  // Aliases are searched too, so a colleague typing "Empori" finds Gulshan-2 —
-  // the spelling they already use, resolving to the zone we store.
-  const matches = needle
-    ? available.filter(
-        (z) =>
-          z.nameEn.toLowerCase().includes(needle) ||
-          z.nameBn.includes(filter.trim()) ||
-          z.aliases.some((a) => a.includes(needle)),
-      )
-    : available.filter((z) => recent.includes(z.id) || DEFAULT_ZONES.includes(z.id));
-
   const selected = value ? ZONES.find((z) => z.id === value) : undefined;
-  const shown = matches.slice(0, VISIBLE_ZONES);
 
-  return (
-    <div>
-      <label className="label" htmlFor={inputId}>{label}</label>
+  const matches = (z: (typeof ZONES)[number]): boolean =>
+    z.nameEn.toLowerCase().includes(needle) ||
+    z.nameBn.includes(filter.trim()) ||
+    z.aliases.some((a) => a.includes(needle));
 
-      {selected && (
-        <div className="chips" style={{ marginBottom: 10 }}>
+  // Typing searches every place, landmarks included, so a colleague who knows
+  // exactly where they mean can go straight there without picking an area.
+  const searchHits = needle
+    ? ZONES.filter((z) => z.id !== exclude && matches(z)).slice(0, VISIBLE_ZONES)
+    : [];
+
+  const areasShown = AREAS.filter((z) => z.id !== exclude && DEFAULT_ZONES.includes(z.id));
+  const landmarks = area ? landmarksIn(area).filter((z) => z.id !== exclude) : [];
+  const chosenArea = area ? ZONES.find((z) => z.id === area) : undefined;
+
+  const choose = (id: string) => {
+    onChange(id);
+    setFilter("");
+    setArea(undefined);
+  };
+
+  if (selected) {
+    return (
+      <div>
+        <span className="label">{label}</span>
+        <div className="chips">
           <button
             type="button"
             className="chip"
@@ -88,48 +94,84 @@ export const ZonePicker = ({
             {lang === "en" ? selected.nameEn : selected.nameBn} ✕
           </button>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {!selected && (
+  return (
+    <div>
+      <label className="label" htmlFor={inputId}>{label}</label>
+      <input
+        id={inputId}
+        className="input"
+        type="search"
+        value={filter}
+        onChange={(e) => {
+          setFilter(e.target.value);
+          setArea(undefined);
+        }}
+        placeholder={lang === "en" ? "Type to search…" : "খুঁজতে লিখুন…"}
+        autoComplete="off"
+      />
+
+      {needle ? (
+        <div className="chips" style={{ marginTop: 11 }} role="group" aria-label={label}>
+          {searchHits.map((z) => (
+            <button key={z.id} type="button" className="chip" onClick={() => choose(z.id)}>
+              {lang === "en" ? z.nameEn : z.nameBn}
+            </button>
+          ))}
+          {searchHits.length === 0 && (
+            <span className="hint">
+              {lang === "en" ? "No place by that name." : "এই নামে কোনো জায়গা নেই।"}
+            </span>
+          )}
+        </div>
+      ) : area ? (
         <>
-          <input
-            id={inputId}
-            className="input"
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder={lang === "en" ? "Type to search…" : "খুঁজতে লিখুন…"}
-            autoComplete="off"
-          />
-          <div className="chips" style={{ marginTop: 10 }} role="group" aria-label={label}>
-            {shown.map((z) => (
-              <button
-                key={z.id}
-                type="button"
-                className="chip"
-                aria-pressed={value === z.id}
-                onClick={() => {
-                  onChange(z.id);
-                  setFilter("");
-                }}
-              >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
+            <button type="button" className="btn ghost" onClick={() => setArea(undefined)}>
+              ←
+            </button>
+            <strong style={{ fontSize: 15 }}>
+              {lang === "en" ? `Where in ${chosenArea?.nameEn}?` : `${chosenArea?.nameBn}-এর কোথায়?`}
+            </strong>
+          </div>
+          <div className="chips" style={{ marginTop: 11 }} role="group" aria-label={label}>
+            {/* Anywhere-in-the-area stays available: a colleague who does not
+                mind the exact spot should not be forced to invent one. */}
+            <button type="button" className="chip" onClick={() => choose(area)}>
+              {lang === "en" ? `${chosenArea?.nameEn} — anywhere` : `${chosenArea?.nameBn} — যেকোনো জায়গা`}
+            </button>
+            {landmarks.map((z) => (
+              <button key={z.id} type="button" className="chip" onClick={() => choose(z.id)}>
                 {lang === "en" ? z.nameEn : z.nameBn}
               </button>
             ))}
-            {shown.length === 0 && (
-              <span className="hint">
-                {lang === "en" ? "No place by that name." : "এই নামে কোনো জায়গা নেই।"}
-              </span>
-            )}
           </div>
-          {matches.length > shown.length && (
-            <p className="hint">
-              {lang === "en"
-                ? `${matches.length - shown.length} more — keep typing to narrow.`
-                : `আরও ${num(matches.length - shown.length, lang)}টি — লিখতে থাকুন।`}
-            </p>
-          )}
+          <p className="hint">
+            {lang === "en"
+              ? "These are far enough apart to take different roads, so the route changes with your choice."
+              : "এগুলো যথেষ্ট দূরে, আলাদা রাস্তা যায় — তাই আপনার পছন্দে রুট বদলে যাবে।"}
+          </p>
         </>
+      ) : (
+        <div className="chips" style={{ marginTop: 11 }} role="group" aria-label={label}>
+          {areasShown.map((z) => {
+            const hasLandmarks = landmarksIn(z.id).length > 0;
+            return (
+              <button
+                key={z.id}
+                type="button"
+                className={`chip${hasLandmarks ? " area" : ""}`}
+                onClick={() => (hasLandmarks ? setArea(z.id) : choose(z.id))}
+              >
+                {lang === "en" ? z.nameEn : z.nameBn}
+                {hasLandmarks && <span aria-hidden="true"> ›</span>}
+              </button>
+            );
+          })}
+        </div>
       )}
     </div>
   );

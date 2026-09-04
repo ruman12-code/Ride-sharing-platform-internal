@@ -1,0 +1,17 @@
+# TLS in two lines, with certificates obtained and renewed automatically.
+#
+# Copy to `Caddyfile`, change the hostname, point DNS at the machine, then:
+#
+#   caddy run
+#
+# Caddy gets a Let's Encrypt certificate on first request and renews it
+# thereafter. Nothing to remember, nothing to expire quietly.
+
+carpool.example.org {
+	reverse_proxy localhost:8080
+}
+
+# Then run the app knowing TLS is handled upstream, so it binds to the network
+# and marks its session cookie Secure:
+#
+#   TRUST_PROXY=1 PILOT_PASSPHRASE='...' npm start
