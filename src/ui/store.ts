@@ -6,6 +6,8 @@ import type { CreditEntry } from "../domain/entities/ledger.js";
 import type { Feedback, Incident, IncidentCategory } from "../domain/entities/support.js";
 import { ZONES, zoneById } from "../adapters/local-json/seed/zones.js";
 import { ZoneGraphPlanner } from "../adapters/routing/zone-graph.js";
+import { RouteTablePlanner, type RouteTable } from "../adapters/routing/route-table.js";
+import routeTable from "../adapters/routing/route-table.json";
 import { ZoneGraph, type Route } from "../domain/matching/geo.js";
 import { FUEL_PRICES } from "../adapters/local-json/seed/fuel.js";
 import { priceOnDate, effectiveKmPerLitre } from "../domain/pricing/fuel.js";
@@ -141,11 +143,18 @@ export interface AppState {
 /**
  * The active route planner.
  *
- * Defaults to the local zone graph: no network, no cost, no journey data
- * leaving the tenant. Swapping in GoogleDirectionsPlanner is a deliberate
- * organisational decision, not a config tweak — see docs/ADR-002-routing.md.
+ * Serves the precomputed table that ships with the app, falling back to the
+ * local graph for any pair the table lacks. **The app makes no network calls to
+ * route anything**, so no record of who travels where can accumulate anywhere.
+ *
+ * The table itself is regenerated offline by an administrator
+ * (`npm run build:routes`), optionally against Google for real road distances.
+ * See docs/ADR-002-routing.md.
  */
-export const planner = new ZoneGraphPlanner(ZONES);
+export const planner = new RouteTablePlanner(
+  routeTable as RouteTable,
+  new ZoneGraphPlanner(ZONES),
+);
 
 export const useApp = () => {
   const [rides, setRides] = useState<readonly Ride[]>(SEED_RIDES);

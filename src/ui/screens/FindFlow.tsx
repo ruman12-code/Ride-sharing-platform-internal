@@ -218,6 +218,11 @@ const BookingSheet = ({
   match: MatchResult;
   onClose: () => void;
 }) => {
+  // The rider chooses which stop on the driver's route to join at. The match
+  // told them the route passes near them; this is where they say which point
+  // they will actually walk to.
+  const [boardZoneId, setBoardZoneId] = useState<string>(match.boardZoneId);
+  const [alightZoneId, setAlightZoneId] = useState<string>(match.alightZoneId);
   const [counterfactual, setCounterfactual] = useState<CounterfactualMode | undefined>();
   const [settlement, setSettlement] = useState<SettlementMode>("credit_ledger");
   const [error, setError] = useState<string | undefined>();
@@ -225,15 +230,24 @@ const BookingSheet = ({
   // Stable for the life of the sheet, so a double-tap is one booking.
   const [idempotencyKey] = useState(() => `${match.ride.id}:${Date.now()}`);
 
-  const pickup = match.ride.pickupPoints.find((p) => p.zoneId === match.boardZoneId);
+  const seq = match.ride.zoneSequence;
+  const boardIndex = seq.indexOf(boardZoneId);
+  // A rider can only get out after they have got in, so the options for each end
+  // are constrained by the other. Offering an impossible pair and then rejecting
+  // it in the domain would be a worse experience than not offering it.
+  const boardOptions = seq.slice(0, Math.max(1, seq.indexOf(alightZoneId)));
+  const alightOptions = seq.slice(boardIndex + 1);
+  const pickup = match.ride.pickupPoints.find((p) => p.zoneId === boardZoneId);
   const driver = userById(match.ride.driverId);
+  const walkTo = (zid: string) =>
+    match.ride.pickupPoints.find((p) => p.zoneId === zid)?.walkingMinutes ?? 10;
 
   const confirm = () => {
     if (!counterfactual) return;
     const r = app.book({
       rideId: match.ride.id,
-      boardZoneId: match.boardZoneId,
-      alightZoneId: match.alightZoneId,
+      boardZoneId,
+      alightZoneId,
       seats: 1,
       counterfactualMode: counterfactual,
       settlementMode: settlement,
@@ -263,11 +277,42 @@ const BookingSheet = ({
         </>
       ) : (
         <>
+          {/*
+            Every stop on the driver's route is a legitimate joining point, so
+            the rider picks the one nearest them rather than being assigned the
+            one they happened to search from. Walking minutes are shown against
+            each, because that is the number that actually decides it.
+          */}
           <div className="card" style={{ boxShadow: "none" }}>
-            <span className="label">{t("pickupPoint", lang)}</span>
-            <div style={{ fontWeight: 600 }}>{zoneName(match.boardZoneId, lang)}</div>
-            <div className="hint">
-              {pickup?.label} · {num(match.walkingMinutes, lang)} {t("minWalk", lang)}
+            <span className="label">{t("whereWillYouJoin", lang)}</span>
+            <div className="chips" role="group" aria-label={t("whereWillYouJoin", lang)}>
+              {boardOptions.map((zid) => (
+                <button
+                  key={zid}
+                  type="button"
+                  className="chip small"
+                  aria-pressed={boardZoneId === zid}
+                  onClick={() => setBoardZoneId(zid)}
+                >
+                  {zoneName(zid, lang)} · {num(walkTo(zid), lang)}{t("minutes", lang)}
+                </button>
+              ))}
+            </div>
+            <div className="hint">{pickup?.label}</div>
+
+            <span className="label" style={{ marginTop: 14 }}>{t("whereWillYouLeave", lang)}</span>
+            <div className="chips" role="group" aria-label={t("whereWillYouLeave", lang)}>
+              {alightOptions.map((zid) => (
+                <button
+                  key={zid}
+                  type="button"
+                  className="chip small"
+                  aria-pressed={alightZoneId === zid}
+                  onClick={() => setAlightZoneId(zid)}
+                >
+                  {zoneName(zid, lang)}
+                </button>
+              ))}
             </div>
           </div>
 

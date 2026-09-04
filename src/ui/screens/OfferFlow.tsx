@@ -56,6 +56,14 @@ export const OfferFlow = ({
   const [error, setError] = useState<string | undefined>();
   const [route, setRoute] = useState<Route | undefined>();
   const [routing, setRouting] = useState(false);
+  /**
+   * The driver has seen the computed route and accepted it.
+   *
+   * Until then the stop chips stay hidden. Showing the whole zone set before a
+   * route exists made the screen 5,912px tall and asked the driver to reason
+   * about places that had nothing to do with their journey.
+   */
+  const [routeApproved, setRouteApproved] = useState(false);
 
   // The route is computed between whatever two zones the driver picked. There
   // is no corridor list, so a journey nobody anticipated works exactly as well
@@ -74,9 +82,10 @@ export const OfferFlow = ({
       if (cancelled) return;
       setRoute(r);
       setRouting(false);
-      // A fresh pair of endpoints means the previous hand-edit no longer
-      // applies; keeping it would publish stops from a different journey.
+      // A fresh pair of endpoints means the previous approval and hand-edit no
+      // longer apply; keeping either would publish stops from another journey.
       setViaTouched(false);
+      setRouteApproved(false);
     });
     return () => {
       cancelled = true;
@@ -163,7 +172,7 @@ export const OfferFlow = ({
   };
 
   const canNext = [
-    Boolean(origin && destination && route && !routing),
+    Boolean(origin && destination && route && !routing && routeApproved),
     Boolean(time),
     seats >= 1,
     true,
@@ -212,44 +221,120 @@ export const OfferFlow = ({
 
           {origin && destination && (
             <div className="card">
-              <span className="label">{t("yourRoute", lang)}</span>
-
               {routing && (
-                <div className="skel" style={{ height: 72 }} aria-live="polite">
-                  <span className="sr-only">{t("calculatingRoute", lang)}</span>
-                </div>
+                <>
+                  <span className="label">{t("calculatingRoute", lang)}</span>
+                  <div className="skel" style={{ height: 72 }} aria-live="polite" />
+                </>
               )}
 
               {!routing && !route && <p className="notice warn">{t("noRoute", lang)}</p>}
 
-              {!routing && route && (
+              {/* Phase 1: the computed route, for the driver to accept. */}
+              {!routing && route && !routeApproved && (
                 <>
+                  <span className="label">{t("suggestedRoute", lang)}</span>
                   <div className="routeline">
                     <span className="routeend">{zoneName(origin, lang)}</span>
-                    {effectiveVia.map((zid) => (
-                      <button
-                        key={zid}
-                        type="button"
-                        className="chip via small"
-                        onClick={() => {
-                          setViaTouched(true);
-                          setVia(effectiveVia.filter((v) => v !== zid));
-                        }}
-                        aria-label={`Remove ${zoneName(zid, "en")}`}
-                      >
-                        {zoneName(zid, lang)} ✕
-                      </button>
+                    {route.zoneSequence.slice(1, -1).map((zid) => (
+                      <span key={zid} className="chip via small" aria-hidden="false">
+                        {zoneName(zid, lang)}
+                      </span>
                     ))}
                     <span className="routeend">{zoneName(destination, lang)}</span>
                   </div>
                   <div className="meta">
-                    <span><strong>{num(distanceKm, lang)} km</strong></span>
+                    <span><strong>{num(route.distanceKm, lang)} km</strong></span>
                     <span>~{num(route.durationMinutes, lang)} {t("minutes", lang)}</span>
                     <span className="badge muted">
                       {route.isEstimate ? t("estimated", lang) : t("liveTraffic", lang)}
                     </span>
                   </div>
-                  <p className="hint">{t("routeHint", lang)}</p>
+                  <button
+                    className="btn primary block"
+                    style={{ marginTop: 14 }}
+                    onClick={() => setRouteApproved(true)}
+                  >
+                    {t("useThisRoute", lang)}
+                  </button>
+                  <button
+                    className="btn ghost block"
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      setOrigin(undefined);
+                      setDestination(undefined);
+                    }}
+                  >
+                    {t("changePoints", lang)}
+                  </button>
+                </>
+              )}
+
+              {/*
+                Phase 2: stops, scoped to the approved route.
+                Only places the driver actually passes are offered, so the list
+                is a handful rather than the whole zone set, and every chip is a
+                decision that means something.
+              */}
+              {!routing && route && routeApproved && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span className="badge exact_route">✓ {t("approvedRoute", lang)}</span>
+                    <button className="btn ghost" onClick={() => setRouteApproved(false)}>
+                      {t("editRoute", lang)}
+                    </button>
+                  </div>
+                  <div className="meta" style={{ marginTop: 8 }}>
+                    <span><strong>{num(distanceKm, lang)} km</strong></span>
+                    <span>~{num(route.durationMinutes, lang)} {t("minutes", lang)}</span>
+                    <span>
+                      {num(effectiveVia.length, lang)} {t("stopsChosen", lang)}
+                    </span>
+                  </div>
+
+                  <span className="label" style={{ marginTop: 16 }}>{t("pickYourStops", lang)}</span>
+                  <div className="chips" role="group" aria-label={t("pickYourStops", lang)}>
+                    {suggested.map((zid) => {
+                      const on = effectiveVia.includes(zid);
+                      return (
+                        <button
+                          key={zid}
+                          type="button"
+                          className="chip small"
+                          aria-pressed={on}
+                          onClick={() => {
+                            setViaTouched(true);
+                            setVia(
+                              on
+                                ? effectiveVia.filter((v) => v !== zid)
+                                : suggested.filter((z) => effectiveVia.includes(z) || z === zid),
+                            );
+                          }}
+                        >
+                          {zoneName(zid, lang)}
+                        </button>
+                      );
+                    })}
+                    {suggested.length === 0 && <span className="hint">—</span>}
+                  </div>
+
+                  {suggested.length > 0 && (
+                    <div className="btnrow" style={{ marginTop: 10 }}>
+                      <button
+                        className="btn ghost"
+                        onClick={() => { setViaTouched(true); setVia(suggested); }}
+                      >
+                        {t("allStops", lang)}
+                      </button>
+                      <button
+                        className="btn ghost"
+                        onClick={() => { setViaTouched(true); setVia([]); }}
+                      >
+                        {t("noStops", lang)}
+                      </button>
+                    </div>
+                  )}
+                  <p className="hint">{t("pickYourStopsHint", lang)}</p>
                 </>
               )}
             </div>

@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "seed": "tsx tools/seed.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:routes": "tsx tools/build-route-table.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
