@@ -38,6 +38,25 @@ export interface RegistrationResult {
 
 export const MIN_PASSWORD_LENGTH = 8;
 
+/**
+ * How many wrong passwords one account tolerates before the door stops
+ * answering, and for how long.
+ *
+ * An eight-character password is fine against a person and worthless against a
+ * script that may guess without limit — and the pilot is on a public URL that
+ * anybody can reach. Ten attempts is more than a colleague misremembering their
+ * own password ever needs, and fifteen minutes is short enough that being
+ * locked out is an inconvenience rather than a support request.
+ *
+ * Counted per account rather than per address, deliberately. Counting by IP
+ * would lock out a whole office behind one connection because somebody two
+ * desks away mistyped, and would do nothing against guesses spread over a
+ * botnet — the account is the thing being attacked, so the account is what is
+ * defended.
+ */
+export const MAX_SIGNIN_ATTEMPTS = 10;
+export const LOCKOUT_MINUTES = 15;
+
 /** Domains that must NOT be used: employer addresses, by design. */
 export const parseBlockedDomains = (raw: string | undefined): readonly string[] =>
   (raw ?? "")
@@ -152,8 +171,32 @@ export class Accounts {
    * Sign in. Returns the user id, or a reason that never distinguishes
    * "no such account" from "wrong password".
    */
-  signIn(email: string, password: string): { userId: string } | { error: string } {
+  signIn(email: string, password: string, now: Date = new Date()): { userId: string } | { error: string } {
     const wrong = { error: "That email and password do not match." };
+    const normalised = email.trim().toLowerCase();
+
+    /*
+      Held in memory on purpose.
+
+      A restart clears it, which is the right trade: this is a brake on
+      guessing, not a record of who failed to sign in, and a table of failed
+      attempts is a small log of people's mistakes that would have to be
+      protected, explained in the privacy notice, and eventually deleted. The
+      brake is worth having; the log is not.
+    */
+    const failures = Accounts.failures.get(normalised);
+    if (failures && failures.count >= MAX_SIGNIN_ATTEMPTS) {
+      const until = failures.first + LOCKOUT_MINUTES * 60_000;
+      if (now.getTime() < until) {
+        const minutes = Math.max(1, Math.ceil((until - now.getTime()) / 60_000));
+        return {
+          error:
+            `Too many sign-in attempts. Try again in ${minutes} ` +
+            `${minutes === 1 ? "minute" : "minutes"}.`,
+        };
+      }
+      Accounts.failures.delete(normalised);
+    }
     const row = this.db.get<{
       id: string;
       status: string;
@@ -165,14 +208,18 @@ export class Accounts {
       email.trim().toLowerCase(),
     );
 
-    if (!row?.passwordHash || !row.passwordSalt) return wrong;
+    if (!row?.passwordHash || !row.passwordSalt) return this.countFailure(normalised, now, wrong);
 
     const given = Buffer.from(hash(password, row.passwordSalt), "hex");
     const want = Buffer.from(row.passwordHash, "hex");
     // Compared even when the outcome is already decided, so a wrong password
     // and an unapproved account take the same time to answer.
     const matches = given.length === want.length && timingSafeEqual(given, want);
-    if (!matches) return wrong;
+    if (!matches) return this.countFailure(normalised, now, wrong);
+
+    // A correct password clears the count. Somebody who mistyped nine times and
+    // then got it right is not mid-attack.
+    Accounts.failures.delete(normalised);
 
     if (row.isSuspended) return { error: "This account has been suspended." };
     if (row.status !== "approved") {
@@ -186,6 +233,26 @@ export class Accounts {
   }
 
   /** Everything an administrator needs to recognise who is asking. */
+  /** Attempts per account: count, and when this window opened. */
+  private static readonly failures = new Map<string, { count: number; first: number }>();
+
+  private countFailure<T>(email: string, now: Date, reply: T): T {
+    const existing = Accounts.failures.get(email);
+    // A window that has already expired starts again rather than accumulating,
+    // so one wrong password a month never adds up to a lockout.
+    if (!existing || now.getTime() - existing.first > LOCKOUT_MINUTES * 60_000) {
+      Accounts.failures.set(email, { count: 1, first: now.getTime() });
+    } else {
+      existing.count += 1;
+    }
+    return reply;
+  }
+
+  /** Test seam: the counter is process-wide, so tests must be able to clear it. */
+  static resetAttempts(): void {
+    Accounts.failures.clear();
+  }
+
   pending(): readonly {
     id: string;
     displayName: string;

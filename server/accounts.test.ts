@@ -6,6 +6,8 @@ import { Db } from "./db.js";
 import { Access } from "./access.js";
 import {
   Accounts,
+  LOCKOUT_MINUTES,
+  MAX_SIGNIN_ATTEMPTS,
   MIN_PASSWORD_LENGTH,
   isWorkAddress,
   parseBlockedDomains,
@@ -207,5 +209,85 @@ describe("approving somebody who registered themselves", () => {
     expect(db.all("SELECT id FROM invite_codes WHERE userId = ?", id)).toHaveLength(0);
     // And the password they chose now works.
     expect("userId" in accounts.signIn(good.email, good.password)).toBe(true);
+  });
+});
+
+
+describe("guessing a password", () => {
+  // The counter is process-wide, so each test starts from a known state.
+  beforeEach(() => Accounts.resetAttempts());
+
+  const approve = () => {
+    accounts.register(good);
+    db.run("UPDATE users SET status = 'approved' WHERE email = ?", good.email);
+  };
+
+  it("stops answering after too many wrong passwords", () => {
+    approve();
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) {
+      expect(accounts.signIn(good.email, `wrong-${i}`)).toEqual({
+        error: "That email and password do not match.",
+      });
+    }
+    const blocked = accounts.signIn(good.email, "wrong-again");
+    expect("error" in blocked && blocked.error).toMatch(/Too many sign-in attempts/);
+  });
+
+  it("refuses the RIGHT password too, once locked", () => {
+    // Otherwise the lock is decorative: a script that happens to guess
+    // correctly on the last attempt would still be let in.
+    approve();
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn(good.email, `wrong-${i}`);
+    const out = accounts.signIn(good.email, good.password);
+    expect("userId" in out).toBe(false);
+  });
+
+  it("says how long is left, rather than just refusing", () => {
+    approve();
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn(good.email, `wrong-${i}`);
+    const out = accounts.signIn(good.email, "x");
+    expect("error" in out && out.error).toMatch(/[0-9]+ minutes?/);
+  });
+
+  it("lets them back in once the window passes", () => {
+    approve();
+    const start = new Date("2026-09-04T09:00:00Z");
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn(good.email, `wrong-${i}`, start);
+    const later = new Date(start.getTime() + (LOCKOUT_MINUTES + 1) * 60_000);
+    expect("userId" in accounts.signIn(good.email, good.password, later)).toBe(true);
+  });
+
+  it("forgets a stale window, so one slip a month never adds up", () => {
+    approve();
+    let when = new Date("2026-01-01T09:00:00Z");
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS * 3; i++) {
+      accounts.signIn(good.email, "wrong", when);
+      when = new Date(when.getTime() + (LOCKOUT_MINUTES + 1) * 60_000);
+    }
+    expect("userId" in accounts.signIn(good.email, good.password, when)).toBe(true);
+  });
+
+  it("clears the count when they finally remember", () => {
+    approve();
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS - 1; i++) accounts.signIn(good.email, "wrong");
+    expect("userId" in accounts.signIn(good.email, good.password)).toBe(true);
+    // The near-miss run is spent, not carried forward.
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS - 1; i++) accounts.signIn(good.email, "wrong");
+    expect("userId" in accounts.signIn(good.email, good.password)).toBe(true);
+  });
+
+  it("locks one account without locking everybody else out", () => {
+    approve();
+    accounts.register({ ...good, email: "tanvir@personal.com" });
+    db.run("UPDATE users SET status = 'approved' WHERE email = 'tanvir@personal.com'");
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn(good.email, "wrong");
+    expect("userId" in accounts.signIn("tanvir@personal.com", good.password)).toBe(true);
+  });
+
+  it("counts attempts on an address that has no account at all", () => {
+    // Otherwise the throttle is trivially avoided by guessing addresses too.
+    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn("nobody@personal.com", "wrong");
+    const out = accounts.signIn("nobody@personal.com", "wrong");
+    expect("error" in out && out.error).toMatch(/Too many sign-in attempts/);
   });
 });
