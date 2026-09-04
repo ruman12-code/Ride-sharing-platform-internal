@@ -12,30 +12,64 @@ working day.
 
 | | |
 |---|---|
-| **Invite-only** | No sign-up form. You hand out codes. |
-| **No email addresses** | Not asked for, not stored. Colleagues pick a display name. |
+| **Self-registration** | Colleagues sign themselves up. You approve. No codes to hand out. |
+| **Personal emails only** | Work addresses are refused, with the reason. |
+| **Notifications** | A driver is told a seat was asked for without opening the app. |
 | **Free hosting** | No domain purchase, no card. |
 | **Clearly unofficial** | Stated at the door, beside the disclaimer, and in About. |
 | **Small** | Five to eight colleagues on one corridor. |
 
-### Why no email addresses
+### Why personal email addresses only
 
-This is the change that lets you launch before speaking to the Data Protection
-Officer, and it is a real reduction rather than a presentational one.
+This is what lets you launch before the Data Protection Officer conversation,
+and it is a real reduction rather than a presentational one.
 
 An address like `nusrat@giz.de` identifies a named person **and** their
 employer, and ties a record of their daily movements to both. That is precisely
-what makes a tool an employer's concern rather than a colleague's side project.
+what turns a tool into an employer's concern rather than a colleague's side
+project.
 
-Without it the database holds a display name somebody chose and the journeys
-they published. Much smaller to be responsible for — and entirely sufficient to
-answer "will people use this?", which is the only question a pilot needs to
-answer.
+A personal address does not carry the employer. The database holds an address
+somebody already uses for personal things, a name they chose, and their
+journeys. The optional *official name* and *department* fields exist only so you
+can recognise who is asking — and a colleague who would rather not say leaves
+them blank and is approved anyway.
 
-**Still do speak to the DPO** — before you scale, and ideally in the same week.
-This lowers the stakes of launching first; it does not remove the conversation.
+Work addresses are **refused with the reason shown**, because reaching for your
+work address is the natural thing to do and a colleague deserves an explanation
+rather than "invalid".
+
+**Still speak to the DPO** — before you scale, and ideally the same week. This
+lowers the stakes of launching first; it does not remove the conversation.
+
+### How a colleague joins
+
+1. They open the link and tap **I need an account**.
+2. Personal email, a password, and what colleagues should call them. Optionally
+   their official name and department.
+3. **You approve them** in Admin, where you can see those optional details.
+4. They sign in with what they chose. Nothing to relay.
 
 ---
+
+## Notifications — what to set
+
+Two channels, both attempted, because they fail differently: push is silent if
+permission was revoked, email lands in a folder nobody watches.
+
+**Email** works as soon as SMTP is configured. **Push** — a real notification on
+the phone — needs a pair of keys you generate once:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Then set `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`. No third party is involved:
+the payload is encrypted to the subscription, so the browser vendor's push
+service relays bytes it cannot read.
+
+Without either, the server says so at startup — `notify: NONE — colleagues must
+open the app to see requests` — rather than letting you find out on Sunday.
 
 ## Free hosting — the recommendation
 
@@ -105,8 +139,8 @@ fly logs | grep "ADMIN CODE"
 - [ ] **Walk the whole thing once yourself**: publish a ride on your real
       corridor, then find and book one. If anything is confusing to you, it will
       be worse for everybody else.
-- [ ] **Mint codes** for five to eight colleagues — Admin → Invite a colleague.
-      Write each name and code on paper. **They are shown once.**
+- [ ] **Turn on notifications** when the app offers, and check you get one:
+      publish a ride from a second browser and request a seat on it.
 
 Pick colleagues who *actually share your corridor*. Eight people scattered
 across Dhaka will match nobody and you will conclude the idea failed when what
@@ -115,10 +149,11 @@ is the right shape.
 
 ## Saturday — 20 minutes
 
-- [ ] Send each person their code individually, by whatever you normally use.
-      **One code per person, sent privately.** A code in a group chat is a code
-      anyone can use.
+- [ ] Send the link to five to eight colleagues. **The link is safe to put in a
+      group chat** — registering does nothing until you approve it.
 - [ ] Use the message below.
+- [ ] **Watch for registrations** and approve them. Admin → *Waiting for
+      approval* shows the official name and department if they gave them.
 - [ ] Seed two or three of your own real rides for Sunday and Monday, so the
       first colleague to look does not find an empty app. **An empty marketplace
       is closed in ten seconds and never reopened.**
@@ -129,11 +164,12 @@ is the right shape.
 > out the fuel share so nobody has to haggle, and it takes about thirty seconds
 > to post a ride.
 >
-> It's at https://ekpothe.fly.dev — your code is **XXXXXX**
+> It's at https://ekpothe.fly.dev — tap "I need an account". **Please use a
+> personal email, not your GIZ one** — that's deliberate, it keeps work data out
+> of this entirely. I'll approve you and you're in.
 >
 > Two honest notes: it's something I made myself, not a GIZ system, and it's a
-> trial. No email address is asked for, no location tracking, and I'll delete
-> everything if we drop it.
+> trial. No location tracking, and I'll delete everything if we drop it.
 >
 > Would you try posting your Sunday commute? Even if nobody matches, knowing
 > that is useful.
@@ -201,14 +237,14 @@ to management.
 
 ## Known gaps, so nothing surprises you on the day
 
-- **No notifications yet.** The T−14h publish prompt and the T−45min reconfirm
-  are written and tested but have no delivery channel — they need Teams or
-  email, which the pilot deliberately avoids. **So colleagues must open the app
-  to see a request.** Tell people to check it once on Sunday morning; without
-  that, a driver may never notice a seat request. This is the single biggest
-  difference from the finished product.
-- **Ratings and the credit ledger are browser-side.** Rides, bookings and
-  sign-in are server-backed and shared; ratings are not yet.
+- **Ratings and the credit ledger are browser-side.** Rides, bookings, sign-in
+  and notifications are server-backed and shared; ratings are not yet.
+- **The T−14h "driving tomorrow?" prompt is not scheduled.** The T−45min
+  reconfirm is. Drivers publish by opening the app rather than by tapping a
+  notification the night before.
+- **On iPhone, push needs the app added to the Home Screen first** (Safari →
+  Share → Add to Home Screen). Email still reaches them either way — worth
+  saying in your message if colleagues use iPhones.
 - No load testing. At eight colleagues this does not matter.
 - The DPIA is unsigned. Deliberate, and the reason the pilot collects so little.
 
@@ -224,3 +260,8 @@ Driven end to end in two separate browsers against the pilot server:
 | **Nusrat, on a different device, sees Ruman's ride** | ✓ under his real name |
 | Nusrat answers the counterfactual and books a seat | ✓ stored server-side |
 | Two people racing for the last seat | ✓ one wins, one is told plainly |
+| A work address tries to register | ✓ refused, with the reason |
+| Registering, then signing in before approval | ✓ told they are waiting |
+| **Driver is told "Nusrat wants a seat" without opening the app** | ✓ by email and push |
+| Driver accepts → rider is told | ✓ |
+| Contact details after acceptance | ✓ both ways; a third party gets nothing |

@@ -1,6 +1,8 @@
 import { type Lang, num, t, taka } from "../i18n.js";
 import { Strapline } from "../components/Strapline.jsx";
 import { Unofficial } from "../components/Unofficial.jsx";
+import { NotifyToggle } from "../components/NotifyToggle.jsx";
+import { SeatRequests } from "../components/SeatRequests.jsx";
 import { timeOf, zoneName } from "../components/common.jsx";
 import { userById, type App } from "../store.js";
 
@@ -24,6 +26,9 @@ export const Home = ({
 
   return (
     <div>
+      {/* Answering a seat request is the one thing a driver must not miss. */}
+      <SeatRequests lang={lang} onAnswered={() => void app.refresh()} />
+
       <button className="bigcard" onClick={onOffer}>
         <span className="icon" aria-hidden="true">🚗</span>
         <span>
@@ -74,6 +79,8 @@ export const Home = ({
           <strong>{num(app.corridorActivity, lang)}</strong> {t("liveActivity", lang)}
         </div>
       </div>
+
+      <NotifyToggle lang={lang} />
 
       <p className="section-title">{t("about", lang)}</p>
       <div className="card">

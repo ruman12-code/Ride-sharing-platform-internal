@@ -14,7 +14,7 @@ export default defineConfig({
   retries: process.env["CI"] ? 1 : 0,
   reporter: process.env["CI"] ? "line" : "list",
   use: {
-    baseURL: "http://localhost:4222",
+    baseURL: "http://localhost:4230",
     trace: "on-first-retry",
     ...(process.env["PW_CHROMIUM"]
       ? { launchOptions: { executablePath: process.env["PW_CHROMIUM"] } }
@@ -27,8 +27,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run build && npx vite preview --port 4222 --strictPort",
-    url: "http://localhost:4222",
+    command: "npm run build && npx vite preview --port 4230 --strictPort",
+    url: "http://localhost:4230",
     reuseExistingServer: !process.env["CI"],
     timeout: 120_000,
   },

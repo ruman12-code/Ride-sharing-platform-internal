@@ -7,14 +7,17 @@ import { Wordmark } from "../components/Wordmark.jsx";
 /**
  * The door.
  *
- * Ekpothe is reachable by anyone — a public URL a colleague can open on their
- * phone without an IT ticket. What is not public is access: a work email
- * address, an administrator who recognises the name, and a code issued to that
- * one person.
+ * A colleague registers themselves with a **personal** address and a password,
+ * an administrator who recognises them approves, and they sign in. No codes to
+ * hand out and nothing to relay.
  *
- * Both failure paths say as little as possible. A form that answers "no such
- * colleague" differently from "wrong code" is a way of finding out who works
- * here, so it does not.
+ * Work addresses are refused with the reason, because reaching for your work
+ * address is the natural thing to do and a colleague deserves to know why it is
+ * the wrong one here rather than being told "invalid".
+ *
+ * Both failure paths say as little as possible otherwise. A form that
+ * distinguishes "no such account" from "wrong password" is a way of finding out
+ * who has signed up.
  */
 export const AccessGate = ({
   lang, onSignedIn,
@@ -22,40 +25,25 @@ export const AccessGate = ({
   lang: Lang;
   onSignedIn: () => void;
 }) => {
-  const [mode, setMode] = useState<"sign-in" | "request">("sign-in");
-  /**
-   * Whether the server wants an email address at all.
-   *
-   * In the pilot it does not: colleagues arrive with a code and choose a
-   * display name, and no address is asked for or stored.
-   */
-  const [inviteOnly, setInviteOnly] = useState(true);
+  const [mode, setMode] = useState<"sign-in" | "register">("sign-in");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [code, setCode] = useState("");
+  const [officialName, setOfficialName] = useState("");
+  const [department, setDepartment] = useState("");
+  const [showOptional, setShowOptional] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | undefined>();
+  const [blocked, setBlocked] = useState<readonly string[]>([]);
 
-  // Ask the server which mode it is in, so the form only ever requests what is
-  // actually wanted.
   useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/request-access", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ probe: true }),
-    })
+    void fetch("/api/config")
       .then((r) => r.json())
-      .then((b: { inviteOnly?: boolean }) => {
-        if (!cancelled) setInviteOnly(Boolean(b.inviteOnly));
-      })
+      .then((c: { blockedDomains?: string[] }) => setBlocked(c.blockedDomains ?? []))
       .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
-  const post = async (path: string, payload: unknown): Promise<Response> =>
+  const post = (path: string, payload: unknown): Promise<Response> =>
     fetch(path, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -66,26 +54,25 @@ export const AccessGate = ({
     setBusy(true);
     setMessage(undefined);
     try {
-      if (inviteOnly) {
-        const res = await post("/api/sign-in", { code, displayName: name });
+      if (mode === "register") {
+        const res = await post("/api/register", {
+          email,
+          password,
+          displayName: name,
+          officialName,
+          department,
+        });
+        const b = (await res.json()) as { ok: boolean; message: string };
+        setMessage({ ok: b.ok, text: b.message });
+        if (b.ok) setMode("sign-in");
+      } else {
+        const res = await post("/api/login", { email, password });
         if (res.ok) {
           onSignedIn();
           return;
         }
         const b = (await res.json()) as { error: string };
         setMessage({ ok: false, text: b.error });
-      } else if (mode === "request") {
-        const res = await post("/api/request-access", { email, displayName: name });
-        const body = (await res.json()) as { ok: boolean; message: string };
-        setMessage({ ok: body.ok, text: body.message });
-      } else {
-        const res = await post("/api/sign-in", { email, code });
-        if (res.ok) {
-          onSignedIn();
-          return;
-        }
-        const body = (await res.json()) as { error: string };
-        setMessage({ ok: false, text: body.error });
       }
     } catch {
       setMessage({
@@ -98,78 +85,22 @@ export const AccessGate = ({
   };
 
   const canSubmit =
-    email.trim().length > 3 && (mode === "request" ? name.trim().length > 0 : code.trim().length >= 6);
-
-  if (inviteOnly) {
-    return (
-      <div className="main" style={{ paddingTop: 34 }}>
-        <div style={{ marginBottom: 22 }}>
-          <Wordmark lang={lang} size="hero" />
-        </div>
-        <p className="sub">{t("inviteOnlyBody", lang)}</p>
-
-        <Unofficial lang={lang} />
-
-        <div className="card raised">
-          <label className="label" htmlFor="code">{t("accessCode", lang)}</label>
-          <input
-            id="code"
-            className="input"
-            autoComplete="one-time-code"
-            maxLength={6}
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            style={{ letterSpacing: "0.34em", fontWeight: 700, fontSize: 20, textAlign: "center" }}
-          />
-
-          <label className="label" htmlFor="name" style={{ marginTop: 16 }}>
-            {t("whatToCallYou", lang)}
-          </label>
-          <input
-            id="name"
-            className="input"
-            autoComplete="name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <p className="hint">{t("nameHint", lang)}</p>
-          <p className="hint"><strong>{t("noEmailNeeded", lang)}</strong></p>
-
-          {message && (
-            <div className={`notice ${message.ok ? "good" : "error"}`} style={{ marginTop: 14 }}>
-              {message.text}
-            </div>
-          )}
-
-          <button
-            className="btn primary block"
-            style={{ marginTop: 16 }}
-            disabled={code.trim().length < 6 || name.trim().length === 0 || busy}
-            onClick={() => void submit()}
-          >
-            {busy ? "…" : t("signIn", lang)}
-          </button>
-        </div>
-
-        <div className="card">
-          <Strapline lang={lang} />
-        </div>
-        <p className="credit"><strong>{t("builtBy", lang)}</strong></p>
-      </div>
-    );
-  }
+    email.trim().length > 3 &&
+    password.length >= (mode === "register" ? 8 : 1) &&
+    (mode === "sign-in" || name.trim().length > 0);
 
   return (
-    <div className="main" style={{ paddingTop: 28 }}>
+    <div className="main" style={{ paddingTop: 32 }}>
       <div style={{ marginBottom: 20 }}>
         <Wordmark lang={lang} size="hero" />
       </div>
-      <p className="sub">{t("accessExplainer", lang)}</p>
 
       <Unofficial lang={lang} />
 
       <div className="card raised">
-        <label className="label" htmlFor="email">{t("workEmail", lang)}</label>
+        <label className="label" htmlFor="email">
+          {mode === "register" ? t("personalEmail", lang) : t("workEmail", lang)}
+        </label>
         <input
           id="email"
           className="input"
@@ -179,70 +110,110 @@ export const AccessGate = ({
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
+        {mode === "register" && (
+          <p className="hint">
+            {t("personalEmailHint", lang)}
+            {blocked.length > 0 && (
+              <> <strong>{blocked.map((d) => `@${d}`).join(", ")}</strong> </>
+            )}
+          </p>
+        )}
 
-        {mode === "request" ? (
+        <label className="label" htmlFor="password" style={{ marginTop: 16 }}>
+          {t("password", lang)}
+        </label>
+        <input
+          id="password"
+          className="input"
+          type="password"
+          autoComplete={mode === "register" ? "new-password" : "current-password"}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        {mode === "register" && <p className="hint">{t("passwordHint", lang)}</p>}
+
+        {mode === "register" && (
           <>
-            <label className="label" htmlFor="name" style={{ marginTop: 14 }}>
-              {t("yourName", lang)}
+            <label className="label" htmlFor="name" style={{ marginTop: 16 }}>
+              {t("whatToCallYou", lang)}
             </label>
             <input
               id="name"
               className="input"
-              autoComplete="name"
+              autoComplete="nickname"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-          </>
-        ) : (
-          <>
-            <label className="label" htmlFor="code" style={{ marginTop: 14 }}>
-              {t("accessCode", lang)}
-            </label>
-            <input
-              id="code"
-              className="input"
-              autoComplete="one-time-code"
-              maxLength={6}
-              value={code}
-              // Codes are read aloud and retyped, so accept any case and let
-              // the field show the shape people were given.
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              style={{ letterSpacing: "0.3em", fontWeight: 600 }}
-            />
+            <p className="hint">{t("nameHint", lang)}</p>
+
+            {/* Collapsed by default: optional fields presented as a wall of
+                inputs read as required, and a colleague who does not want to
+                give them should not have to scroll past them. */}
+            <button
+              type="button"
+              className="toggle"
+              style={{ marginTop: 10 }}
+              aria-expanded={showOptional}
+              onClick={() => setShowOptional((v) => !v)}
+            >
+              <span style={{ fontSize: 14 }}>{t("optionalSection", lang)}</span>
+              <span aria-hidden="true">{showOptional ? "▴" : "▾"}</span>
+            </button>
+
+            {showOptional && (
+              <div style={{ marginTop: 8 }}>
+                <label className="label" htmlFor="official">{t("officialName", lang)}</label>
+                <input
+                  id="official"
+                  className="input"
+                  value={officialName}
+                  onChange={(e) => setOfficialName(e.target.value)}
+                />
+                <label className="label" htmlFor="dept" style={{ marginTop: 12 }}>
+                  {t("departmentField", lang)}
+                </label>
+                <input
+                  id="dept"
+                  className="input"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                />
+                <p className="hint">{t("optionalHint", lang)}</p>
+              </div>
+            )}
           </>
         )}
 
         {message && (
-          <div className={`notice ${message.ok ? "good" : "error"}`} style={{ marginTop: 14 }}>
+          <div className={`notice ${message.ok ? "good" : "error"}`} style={{ marginTop: 16 }}>
             {message.text}
           </div>
         )}
 
         <button
           className="btn primary block"
-          style={{ marginTop: 16 }}
+          style={{ marginTop: 18 }}
           disabled={!canSubmit || busy}
           onClick={() => void submit()}
         >
-          {busy ? "…" : t(mode === "request" ? "requestAccess" : "signIn", lang)}
+          {busy ? "…" : t(mode === "register" ? "register" : "signIn", lang)}
         </button>
 
         <button
           className="btn ghost block"
           style={{ marginTop: 8 }}
           onClick={() => {
-            setMode(mode === "request" ? "sign-in" : "request");
+            setMode(mode === "register" ? "sign-in" : "register");
             setMessage(undefined);
           }}
         >
-          {t(mode === "request" ? "haveACode" : "needACode", lang)}
+          {t(mode === "register" ? "alreadyHave" : "needAccount", lang)}
         </button>
       </div>
 
       <div className="card">
         <Strapline lang={lang} />
       </div>
-
       <p className="credit"><strong>{t("builtBy", lang)}</strong></p>
     </div>
   );

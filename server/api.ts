@@ -290,6 +290,79 @@ export class Api {
     return { ok: false, error: "That seat just went.", code: "SEAT_TAKEN" };
   }
 
+  /** The driver accepts a request. Contact details unlock at this point. */
+  async acceptBooking(
+    bookingId: Id,
+    driverId: Id,
+  ): Promise<{ ok: true; value: Booking } | { ok: false; error: { message: string } }> {
+    const booking = this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
+    if (!booking) return { ok: false, error: { message: "That request no longer exists." } };
+    const ride = this.getRide(booking.rideId);
+    if (!ride) return { ok: false, error: { message: "That ride no longer exists." } };
+    if (ride.driverId !== driverId) return { ok: false, error: { message: "That is not your ride." } };
+    if (booking.status !== "requested") {
+      return { ok: false, error: { message: "That request has already been answered." } };
+    }
+
+    const { changes } = this.db.run(
+      "UPDATE bookings SET status = 'confirmed', rowVersion = rowVersion + 1 WHERE id = ? AND rowVersion = ?",
+      bookingId,
+      booking.rowVersion,
+    );
+    if (changes !== 1) return { ok: false, error: { message: "That request just changed." } };
+    this.db.audit(driverId, "booking", bookingId, "accept");
+    return { ok: true, value: this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId)! };
+  }
+
+  /**
+   * The driver declines. The seat is released.
+   *
+   * Nothing records or reveals *why*, and the rider is never told who declined
+   * — an attributed decline in an office of this size is a lasting social cost.
+   */
+  async declineBooking(
+    bookingId: Id,
+    driverId: Id,
+  ): Promise<{ ok: true; value: Booking } | { ok: false; error: { message: string } }> {
+    const booking = this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
+    if (!booking) return { ok: false, error: { message: "That request no longer exists." } };
+    const ride = this.getRide(booking.rideId);
+    if (!ride) return { ok: false, error: { message: "That ride no longer exists." } };
+    if (ride.driverId !== driverId) return { ok: false, error: { message: "That is not your ride." } };
+
+    return this.db.transaction(() => {
+      this.db.run(
+        "UPDATE bookings SET status = 'declined', rowVersion = rowVersion + 1 WHERE id = ?",
+        bookingId,
+      );
+      // Give the seat back, so somebody else can have it.
+      const remaining = this.listBookingsForRide(ride.id);
+      this.db.run(
+        "UPDATE rides SET seatsAvailable = ?, status = CASE WHEN status = 'full' THEN 'published' ELSE status END, rowVersion = rowVersion + 1 WHERE id = ?",
+        computeSeatsAvailable(ride.seatsTotal, remaining),
+        ride.id,
+      );
+      this.db.audit(driverId, "booking", bookingId, "decline");
+      return {
+        ok: true as const,
+        value: this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId)!,
+      };
+    });
+  }
+
+  /** Bookings awaiting this driver's answer, across all their rides. */
+  pendingForDriver(driverId: Id): readonly (Booking & { riderName: string; departureAt: string })[] {
+    return this.db.all(
+      `SELECT b.*, u.displayName AS riderName, r.departureAt AS departureAt
+         FROM bookings b
+         JOIN rides r ON r.id = b.rideId
+         JOIN users u ON u.id = b.riderId
+        WHERE r.driverId = ? AND b.status = 'requested'
+        ORDER BY r.departureAt`,
+      driverId,
+    );
+  }
+
   /** Recomputed from bookings, never trusted from the row. */
   seatsAvailable(rideId: string): number {
     const ride = this.getRide(rideId);

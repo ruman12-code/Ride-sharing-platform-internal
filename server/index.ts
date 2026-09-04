@@ -7,6 +7,8 @@ import { Db } from "./db.js";
 import { Api, type Session } from "./api.js";
 import { Access, parseAllowedDomains } from "./access.js";
 import { accessCodeEmail, createMailer } from "./mailer.js";
+import { Accounts, parseBlockedDomains } from "./accounts.js";
+import { Notifier, notifications } from "./notify.js";
 import { FUEL_PRICES } from "../src/adapters/local-json/seed/fuel.js";
 
 /**
@@ -108,7 +110,36 @@ if (!ADMIN_EMAIL) {
 
 const db = new Db(DB_PATH);
 const api = new Api(db);
+/**
+ * Employer domains that may NOT be used to register.
+ *
+ * Blocking them is the point rather than a restriction: a work address
+ * identifies a person and their employer together, which is what would make
+ * this the employer's concern rather than a colleague's project.
+ */
+const BLOCKED_DOMAINS = parseBlockedDomains(process.env["BLOCKED_EMAIL_DOMAINS"] ?? "giz.de");
+
+/**
+ * Push keys. Generate once with:  npx web-push generate-vapid-keys
+ * Without them the app still notifies by email; it simply cannot buzz a phone.
+ */
+const VAPID_PUBLIC = process.env["VAPID_PUBLIC_KEY"];
+const VAPID_PRIVATE = process.env["VAPID_PRIVATE_KEY"];
+
 const mailer = createMailer();
+const accounts = new Accounts(db, BLOCKED_DOMAINS);
+const notifier = new Notifier(
+  db,
+  mailer,
+  VAPID_PUBLIC && VAPID_PRIVATE
+    ? {
+        publicKey: VAPID_PUBLIC,
+        privateKey: VAPID_PRIVATE,
+        subject: process.env["VAPID_SUBJECT"] ?? `mailto:admin@${new URL(APP_URL).hostname}`,
+      }
+    : undefined,
+  APP_URL,
+);
 const access = new Access(db, {
   mode: ACCESS_MODE,
   allowedDomains: ALLOWED_DOMAINS,
@@ -217,8 +248,51 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         const session: Session | undefined = api.sessionFor(cookie(req));
 
         // Open endpoints: asking for access, and redeeming a code.
+        if (url.pathname === "/api/register" && req.method === "POST") {
+          const b = await body(req);
+          return send(200, accounts.register({
+            email: String(b["email"] ?? ""),
+            password: String(b["password"] ?? ""),
+            displayName: String(b["displayName"] ?? ""),
+            ...(b["officialName"] ? { officialName: String(b["officialName"]) } : {}),
+            ...(b["department"] ? { department: String(b["department"]) } : {}),
+          }));
+        }
+
+        if (url.pathname === "/api/login" && req.method === "POST") {
+          const b = await body(req);
+          const out = accounts.signIn(String(b["email"] ?? ""), String(b["password"] ?? ""));
+          if ("error" in out) return send(401, { error: out.error });
+          const token = api.createSession(out.userId);
+          res.setHeader(
+            "set-cookie",
+            `cp=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 3600}` +
+              (SECURE ? "; Secure" : ""),
+          );
+          return send(200, api.sessionFor(token));
+        }
+
+        // Told to the sign-in screen so it knows which form to show, and so the
+        // browser can subscribe to push. The public key is public by design.
+        if (url.pathname === "/api/config") {
+          return send(200, {
+            mode: ACCESS_MODE,
+            selfRegister: true,
+            pushKey: VAPID_PUBLIC ?? null,
+            blockedDomains: BLOCKED_DOMAINS,
+          });
+        }
+
         if (url.pathname === "/api/request-access" && req.method === "POST") {
-          if (ACCESS_MODE === "invite") {
+          console.log(
+    notifier.canPush
+      ? "  notify:     push + email"
+      : mailer.enabled
+        ? "  notify:     email only — set VAPID keys to reach phones directly"
+        : "  notify:     NONE — colleagues must open the app to see requests",
+  );
+  console.log(`  register:   self-registration on, ${BLOCKED_DOMAINS.map((d) => `@${d}`).join(", ")} blocked`);
+  if (ACCESS_MODE === "invite") {
             return send(200, {
               ok: false,
               inviteOnly: true,
@@ -277,6 +351,9 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
 
         if (!session) return send(401, { error: "Not signed in." });
 
+        if (url.pathname === "/api/pending-requests" && req.method === "GET") {
+          return send(200, { requests: api.pendingForDriver(session.userId) });
+        }
         if (url.pathname === "/api/people" && req.method === "GET") {
           return send(200, { people: api.listPeople() });
         }
@@ -293,7 +370,60 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         }
         if (url.pathname === "/api/bookings" && req.method === "POST") {
           const out = api.requestSeat(session, (await body(req)) as never);
-          return out.ok ? send(201, out.booking) : send(409, { error: out.error, code: out.code });
+          if (!out.ok) return send(409, { error: out.error, code: out.code });
+
+          // The reason this product exists. Without it the driver finds out
+          // only if they happen to open the app, which is exactly how the
+          // spreadsheet failed.
+          const ride = api.getRide(out.booking.rideId);
+          if (ride) {
+            void notifier.send(
+              notifications.seatRequested(
+                ride.driverId,
+                out.booking.id,
+                session.displayName,
+                out.booking.boardZoneId,
+                ride.departureAt.slice(11, 16),
+              ),
+            );
+          }
+          return send(201, out.booking);
+        }
+
+        if (url.pathname === "/api/bookings/accept" && req.method === "POST") {
+          const b = await body(req);
+          const out = await api.acceptBooking(String(b["bookingId"] ?? ""), session.userId);
+          if (!out.ok) return send(400, { error: out.error.message });
+          const ride = api.getRide(out.value.rideId);
+          if (ride) {
+            void notifier.send(
+              notifications.seatAccepted(
+                out.value.riderId,
+                out.value.id,
+                session.displayName,
+                ride.departureAt.slice(11, 16),
+              ),
+            );
+          }
+          return send(200, out.value);
+        }
+
+        if (url.pathname === "/api/bookings/decline" && req.method === "POST") {
+          const b = await body(req);
+          const out = await api.declineBooking(String(b["bookingId"] ?? ""), session.userId);
+          if (!out.ok) return send(400, { error: out.error.message });
+          const ride = api.getRide(out.value.rideId);
+          if (ride) {
+            // Never says who declined, or why.
+            void notifier.send(
+              notifications.seatDeclined(
+                out.value.riderId,
+                out.value.id,
+                ride.departureAt.slice(11, 16),
+              ),
+            );
+          }
+          return send(200, { ok: true });
         }
         if (url.pathname === "/api/complete" && req.method === "POST") {
           const b = await body(req);
@@ -304,6 +434,27 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           api.recordZeroResult(session, (await body(req)) as never);
           return send(204, null);
         }
+        if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
+          const b = (await body(req)) as unknown as {
+            endpoint?: string;
+            keys?: { p256dh?: string; auth?: string };
+          };
+          if (!b.endpoint || !b.keys?.p256dh || !b.keys.auth) {
+            return send(400, { error: "Incomplete subscription." });
+          }
+          notifier.subscribe(session.userId, {
+            endpoint: b.endpoint,
+            keys: { p256dh: b.keys.p256dh, auth: b.keys.auth },
+          });
+          return send(200, { ok: true });
+        }
+        if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
+          const b = await body(req);
+          db.run("DELETE FROM push_subscriptions WHERE endpoint = ? AND userId = ?",
+            String(b["endpoint"] ?? ""), session.userId);
+          return send(200, { ok: true });
+        }
+
         if (url.pathname === "/api/contact" && req.method === "PUT") {
           const b = await body(req);
           api.setContact(session.userId, String(b["kind"] ?? "phone"), String(b["value"] ?? ""));
@@ -321,7 +472,9 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         if (url.pathname.startsWith("/api/admin/")) {
           if (session.role !== "admin") return send(403, { error: "Not an administrator." });
           if (url.pathname === "/api/admin/pending" && req.method === "GET") {
-            return send(200, { pending: access.pending() });
+            // From accounts, so the administrator sees the optional official
+            // name and department a colleague gave them to be recognised by.
+            return send(200, { pending: accounts.pending() });
           }
           if (url.pathname === "/api/admin/approve" && req.method === "POST") {
             const b = await body(req);
@@ -378,11 +531,73 @@ const server = OWN_TLS
 // is visible and the first is not.
 const HOST = SECURE ? "0.0.0.0" : "127.0.0.1";
 
+/**
+ * The T−45min reconfirm, and nothing else on a timer.
+ *
+ * No-shows are the highest-frequency failure in commute carpooling: a driver
+ * who waits at a pickup point for somebody who never comes does not offer a
+ * seat again. A single check every five minutes is enough — `Notifier.send`
+ * refuses to send a notification whose id it has already recorded, so an
+ * overlapping run or a restart cannot buzz the same phone twice.
+ */
+const RECONFIRM_WINDOW_MS = 45 * 60_000;
+const SCHEDULER_TICK_MS = 5 * 60_000;
+
+const runReconfirmSweep = (): void => {
+  try {
+    const now = Date.now();
+    const soon = new Date(now + RECONFIRM_WINDOW_MS).toISOString();
+    const nowIso = new Date(now).toISOString();
+
+    const due = db.all<{
+      rideId: string;
+      driverId: string;
+      riderId: string;
+      driverName: string;
+      riderName: string;
+      departureAt: string;
+    }>(
+      `SELECT r.id AS rideId, r.driverId, b.riderId,
+              d.displayName AS driverName, p.displayName AS riderName,
+              r.departureAt
+         FROM bookings b
+         JOIN rides r ON r.id = b.rideId
+         JOIN users d ON d.id = r.driverId
+         JOIN users p ON p.id = b.riderId
+        WHERE b.status = 'confirmed'
+          AND r.status IN ('published', 'full')
+          AND r.departureAt > ? AND r.departureAt <= ?`,
+      nowIso,
+      soon,
+    );
+
+    for (const row of due) {
+      const time = row.departureAt.slice(11, 16);
+      // Both sides: each needs to know the other is still coming.
+      void notifier.send(notifications.reconfirm(row.driverId, row.rideId, row.riderName, time));
+      void notifier.send(notifications.reconfirm(row.riderId, row.rideId, row.driverName, time));
+    }
+  } catch (e) {
+    // A failing sweep must never take the server down with it.
+    console.error("reconfirm sweep failed:", e);
+  }
+};
+
+setInterval(runReconfirmSweep, SCHEDULER_TICK_MS).unref();
+
 server.listen(PORT, HOST, () => {
   const scheme = OWN_TLS ? "https" : "http";
   console.log(`Ekpothe — pilot server`);
   console.log(`  ${scheme}://${HOST === "0.0.0.0" ? "0.0.0.0" : "localhost"}:${PORT}`);
   console.log(`  database:   ${DB_PATH}`);
+  console.log(
+    notifier.canPush
+      ? "  notify:     push + email"
+      : mailer.enabled
+        ? "  notify:     email only — set VAPID keys to reach phones directly"
+        : "  notify:     NONE — colleagues must open the app to see requests",
+  );
+  console.log(`  register:   self-registration on, ${BLOCKED_DOMAINS.map((d) => `@${d}`).join(", ")} blocked`);
   if (ACCESS_MODE === "invite") {
     console.log("  access:     invite-only — no email addresses asked for or stored");
     console.log("  joining:    you mint a code in Admin and hand it to a colleague");

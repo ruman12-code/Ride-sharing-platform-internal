@@ -111,6 +111,52 @@ export const STRINGS = {
     bn: "সহকর্মীর স্বেচ্ছামূলক টুল — প্রাতিষ্ঠানিক ব্যবস্থা নয়।",
   },
 
+  // Registration
+  register: { en: "Create an account", bn: "অ্যাকাউন্ট খুলুন" },
+  alreadyHave: { en: "I already have an account", bn: "আমার অ্যাকাউন্ট আছে" },
+  needAccount: { en: "I need an account", bn: "আমার অ্যাকাউন্ট দরকার" },
+  personalEmail: { en: "Personal email", bn: "ব্যক্তিগত ইমেইল" },
+  personalEmailHint: {
+    en: "Your own address, not your work one. That's deliberate — it keeps your employer's data out of this entirely.",
+    bn: "আপনার নিজের ঠিকানা, অফিসের নয়। এটি ইচ্ছাকৃত — এতে আপনার প্রতিষ্ঠানের তথ্য এর বাইরে থাকে।",
+  },
+  password: { en: "Password", bn: "পাসওয়ার্ড" },
+  passwordHint: { en: "At least 8 characters.", bn: "কমপক্ষে ৮টি অক্ষর।" },
+  optionalSection: { en: "Optional — helps me recognise you", bn: "ঐচ্ছিক — আপনাকে চিনতে সাহায্য করে" },
+  officialName: { en: "Your name at work", bn: "অফিসে আপনার নাম" },
+  departmentField: { en: "Department", bn: "বিভাগ" },
+  optionalHint: {
+    en: "Leave both blank if you'd rather not say. You'll still be approved.",
+    bn: "না জানাতে চাইলে খালি রাখুন। তবুও অনুমোদন পাবেন।",
+  },
+
+  // Notifications
+  notifications: { en: "Notifications", bn: "নোটিফিকেশন" },
+  notifyOn: { en: "Notifications are on", bn: "নোটিফিকেশন চালু আছে" },
+  notifyOff: { en: "Turn on notifications", bn: "নোটিফিকেশন চালু করুন" },
+  notifyWhy: {
+    en: "So you hear about a seat request without opening the app. This is the whole point — a driver who never checks is a colleague left waiting.",
+    bn: "অ্যাপ না খুলেই সিটের অনুরোধ জানতে। এটাই মূল কথা — চালক না দেখলে সহকর্মী অপেক্ষায় থাকেন।",
+  },
+  notifyDenied: {
+    en: "Your browser has blocked notifications for this site. You can allow them again in your browser settings.",
+    bn: "আপনার ব্রাউজার এই সাইটের নোটিফিকেশন বন্ধ করেছে। ব্রাউজার সেটিংস থেকে চালু করতে পারেন।",
+  },
+  notifyUnsupported: {
+    en: "This browser can't show notifications. You'll still get an email.",
+    bn: "এই ব্রাউজারে নোটিফিকেশন দেখানো যায় না। তবে ইমেইল পাবেন।",
+  },
+
+  // Requests waiting for the driver
+  seatRequests: { en: "Seat requests", bn: "সিটের অনুরোধ" },
+  accept: { en: "Accept", bn: "গ্রহণ" },
+  decline: { en: "Decline", bn: "না" },
+  declineQuiet: {
+    en: "Declining is silent — they're only told the seat isn't available.",
+    bn: "না বললে নীরবে হয় — তাঁকে শুধু জানানো হয় সিট নেই।",
+  },
+  wantsASeat: { en: "wants a seat", bn: "একটি সিট চান" },
+
   // Invite-only pilot
   inviteOnlyTitle: { en: "You'll need a code", bn: "আপনার একটি কোড লাগবে" },
   inviteOnlyBody: {

@@ -80,6 +80,49 @@ Fly.io, or a machine inside the office network. One process, one file.
 
 ## Who can get in
 
+**Self-registration is the default.** A colleague registers with a **personal**
+email and a password, an administrator approves, and they sign in. No codes to
+distribute.
+
+Work addresses are refused, with the reason. That is the point rather than a
+restriction: an employer address identifies a person *and* their employer and
+ties their daily movements to both, which is what would make this the employer's
+concern rather than a colleague's project. The optional *official name* and
+*department* fields exist only so an administrator can recognise who is asking;
+a colleague who leaves them blank is approved on the strength of their name.
+
+Passwords are scrypt-hashed with a per-user salt and never returned by any
+endpoint. Sign-in gives one answer for a wrong password and an unknown address,
+so it cannot be used to discover who has registered.
+
+| Variable | Default | |
+|---|---|---|
+| `BLOCKED_EMAIL_DOMAINS` | `giz.de` | Employer domains that may **not** register |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | unset | Push notifications; `npx web-push generate-vapid-keys` |
+
+## Notifications
+
+Two channels, both attempted, because they fail differently: push is silent when
+permission has been revoked, and email lands in a folder nobody watches.
+
+- **Push** — a real phone notification. No third party of ours: the payload is
+  encrypted to the subscription, so the browser vendor's push service relays
+  bytes it cannot read.
+- **Email** — arrives on every device with no permission prompt.
+
+Sent when somebody requests a seat, when a driver accepts or declines, and at
+T−45min to both sides. Declines are never attributed: the rider is told the seat
+is unavailable, never who declined or why.
+
+Delivery is idempotent on a notification id derived from *what it is about*, not
+when it was sent, so a restarted scheduler cannot buzz the same phone twice for
+the same thing.
+
+The server prints which channels are live at startup, so a pilot never
+discovers on the day that it had none.
+
+## Legacy: invite codes
+
 Every route starts with the email domain: only addresses on
 `ALLOWED_EMAIL_DOMAINS` may ask at all. Anything else gets
 *"Sorry! You are not in our organisation…"* and goes no further.

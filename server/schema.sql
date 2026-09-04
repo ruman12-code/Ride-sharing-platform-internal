@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS users (
   id               TEXT PRIMARY KEY,
   displayName      TEXT NOT NULL,
   email            TEXT NOT NULL UNIQUE,
-  department       TEXT NOT NULL DEFAULT '',
   officeLocation   TEXT NOT NULL DEFAULT '',
   -- Access state. Nobody reaches the app on 'pending': a colleague asks, an
   -- administrator who recognises the name approves, and only then is a code
@@ -24,6 +23,14 @@ CREATE TABLE IF NOT EXISTS users (
   status           TEXT NOT NULL DEFAULT 'pending',
   approvedBy       TEXT,
   approvedAt       TEXT,
+  -- Password, scrypt-hashed with a per-user salt. Never stored in the clear,
+  -- and never returned by any endpoint.
+  passwordHash     TEXT,
+  passwordSalt     TEXT,
+  -- Optional, and only so an administrator can recognise who is asking.
+  -- A colleague who would rather not say leaves both blank and still gets in.
+  officialName     TEXT,
+  department       TEXT,
   -- How a colleague is reached once a driver has accepted them. Never listed,
   -- never searchable, never exported. See domain/policy/contact-exchange.ts.
   contactKind      TEXT,
@@ -228,6 +235,34 @@ CREATE TABLE IF NOT EXISTS contact_reveals (
   viewerId  TEXT NOT NULL,
   subjectId TEXT NOT NULL,
   at        TEXT NOT NULL
+);
+
+-- Browser push subscriptions.
+--
+-- One per device, so a colleague with a phone and a laptop is reached on both.
+-- Endpoints are opaque URLs issued by the browser vendor's push service; they
+-- identify a browser installation, not a person, and are deleted the moment the
+-- push service says they are gone.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id        TEXT PRIMARY KEY,
+  userId    TEXT NOT NULL REFERENCES users(id),
+  endpoint  TEXT NOT NULL UNIQUE,
+  p256dh    TEXT NOT NULL,
+  auth      TEXT NOT NULL,
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(userId);
+
+-- Sent notifications, so the same one is never delivered twice.
+--
+-- The id is derived from what the notification is about, not from when it was
+-- sent, so a retry or a restarted scheduler cannot buzz somebody's phone again
+-- for a thing they have already been told.
+CREATE TABLE IF NOT EXISTS sent_notifications (
+  id     TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  kind   TEXT NOT NULL,
+  at     TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
