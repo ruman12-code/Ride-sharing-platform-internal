@@ -20,6 +20,12 @@ const pickZone = async (page: Page, field: "from" | "to", name: string) => {
     .click();
 };
 
+/** The driver must see and accept the computed route before the stops appear. */
+const approveRoute = async (page: Page) => {
+  await page.getByRole("button", { name: "Use this route" }).click();
+  await expect(page.getByText("Route confirmed")).toBeVisible();
+};
+
 test("no page error on any screen", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -40,6 +46,7 @@ test("the declaration from the legacy form is visible while entering data", asyn
   // It stays visible on every step, and is not collapsible.
   await pickZone(page, "from", "Uttara");
   await pickZone(page, "to", "Gulshan-2");
+  await approveRoute(page);
   await page.getByRole("button", { name: "Next" }).click();
   await expect(declaration).toBeVisible();
 });
@@ -49,13 +56,20 @@ test("a driver publishes a journey no corridor list contained", async ({ page })
   await pickZone(page, "from", "Mirpur-12");
   await pickZone(page, "to", "Motijheel");
 
-  // The route is computed, not looked up.
+  // The route is computed, not looked up, and shown for the driver to accept.
   const route = page.locator(".routeline");
   await expect(route).toBeVisible();
   await expect(route).toContainText("Mirpur-12");
   await expect(route).toContainText("Motijheel");
-  // Intermediate stops appear, and each is a boarding point.
   await expect(page.locator(".routeline .chip.via").first()).toBeVisible();
+
+  await approveRoute(page);
+
+  // Only now do the stops appear, and only those on this route — not the
+  // whole zone set.
+  const stops = page.locator('[aria-label="Where will you stop?"] button');
+  await expect(stops.first()).toBeVisible();
+  expect(await stops.count()).toBeLessThan(12);
 
   await page.getByRole("button", { name: "Next" }).click();
   await page.getByRole("button", { name: "Next" }).click();
@@ -135,10 +149,20 @@ test("the admin can see the stale-rate alarm and confirm the rate", async ({ pag
   await expect(page.getByText(/has not been confirmed/)).toHaveCount(0);
 });
 
+test("the strapline spells the builder's name down its initials", async ({ page }) => {
+  await page.goto("/");
+  const initials = await page.locator(".strapline .lead").allInnerTexts();
+  expect(initials.join("")).toBe("RUMAN");
+  // Each line must still read as a whole sentence to a screen reader.
+  const spoken = await page.locator(".strapline .sr-only").allInnerTexts();
+  expect(spoken[0]).toBe("Ride together, not alone.");
+  await expect(page.getByText("Built for us, by Ruman")).toBeVisible();
+});
+
 test("the whole interface switches to Bangla", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "বাংলা" }).click();
-  await expect(page.getByRole("heading", { name: "অফিস কারপুল" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /একপথে/ })).toBeVisible();
   await expect(page.getByText("রাইড অফার করুন").first()).toBeVisible();
   // Numbers use Bangla-Indic digits, not Latin ones.
   await expect(page.locator(".card").filter({ hasText: "সহকর্মী" })).toContainText(/[০-৯]/);

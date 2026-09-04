@@ -1,4 +1,4 @@
-# Privacy notice — Office Carpool
+# Privacy notice — Ekpothe (একপথে)
 
 **Version 1.0 · 4 September 2026**
 

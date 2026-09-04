@@ -217,4 +217,4 @@ export const buildWorkbook = (input: ExportInput): readonly Sheet[] => {
 
 /** Filename carrying the snapshot date, so exports never overwrite each other. */
 export const exportFilename = (generatedAt: string): string =>
-  `carpool-export-${generatedAt.slice(0, 10)}.xlsx`;
+  `ekpothe-export-${generatedAt.slice(0, 10)}.xlsx`;

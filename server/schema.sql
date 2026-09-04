@@ -1,4 +1,4 @@
--- Office Carpool — standalone pilot schema.
+-- Ekpothe — standalone pilot schema.
 --
 -- SQLite, because a pilot for under 150 people needs a file, not a cluster.
 -- The same port interfaces the SharePoint adapter will implement sit on top of

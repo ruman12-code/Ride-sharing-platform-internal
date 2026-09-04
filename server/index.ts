@@ -168,7 +168,7 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Office Carpool pilot`);
+  console.log(`Ekpothe — pilot server`);
   console.log(`  http://localhost:${PORT}`);
   console.log(`  database: ${DB_PATH}`);
   console.log(`  passphrase: set (${PASSPHRASE.length} characters)`);

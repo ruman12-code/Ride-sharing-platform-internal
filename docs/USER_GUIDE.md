@@ -1,8 +1,14 @@
-# Using Office Carpool
+# Using Ekpothe (একপথে)
 
 For colleagues, and for whoever administers it. No jargon.
 
 ---
+
+> **R**ide together, not alone.
+> **U**se one car instead of three.
+> **M**eet the colleagues you never see.
+> **A**rrive on time, more often.
+> **N**o fares — just fuel, shared fairly.
 
 ## The idea in one paragraph
 

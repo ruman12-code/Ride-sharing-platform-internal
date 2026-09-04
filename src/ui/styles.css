@@ -459,3 +459,37 @@ input[type="range"]::-moz-range-thumb {
 .statvalue { font-size: 28px; font-weight: 700; line-height: 1.15; color: var(--green-dark); }
 .stat.lead .statvalue { font-size: 36px; }
 .statlabel { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+
+/* ---------- strapline ---------- */
+.strapline { list-style: none; margin: 0; padding: 0; }
+/* No flex gap and no min-width: the initial must sit flush against the rest of
+   the word, so the line reads "Ride together" and not "R ide together". The
+   letter is distinguished by weight and colour, not by a space. */
+.strapline li {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  padding: 3px 0;
+}
+.strapline .lead {
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--green);
+}
+.strapline-bn { font-size: 14px; color: var(--ink-soft); margin: 0; }
+
+/* ---------- about ---------- */
+.wordmark { display: flex; align-items: baseline; gap: 7px; }
+.wordmark .sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-faint);
+  letter-spacing: 0.01em;
+}
+.credit {
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-faint);
+  padding: 18px 0 4px;
+}
+.credit strong { color: var(--ink-soft); font-weight: 600; }

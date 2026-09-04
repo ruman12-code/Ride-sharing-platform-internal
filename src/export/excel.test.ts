@@ -124,6 +124,6 @@ describe("buildWorkbook", () => {
 
 describe("exportFilename", () => {
   it("carries the snapshot date so exports never overwrite each other", () => {
-    expect(exportFilename("2026-09-04T10:00:00+06:00")).toBe("carpool-export-2026-09-04.xlsx");
+    expect(exportFilename("2026-09-04T10:00:00+06:00")).toBe("ekpothe-export-2026-09-04.xlsx");
   });
 });

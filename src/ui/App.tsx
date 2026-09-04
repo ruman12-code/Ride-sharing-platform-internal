@@ -18,7 +18,10 @@ export const App = () => {
   return (
     <div className="app" lang={lang}>
       <header className="topbar">
-        <h1>{t("appName", lang)}</h1>
+        <h1 className="wordmark">
+          {t("appName", lang)}
+          <span className="sub">{t("appNameSub", lang)}</span>
+        </h1>
         <span className="spacer" />
         <div className="langtoggle" role="group" aria-label="Language">
           <button aria-pressed={lang === "en"} onClick={() => setLang("en")}>EN</button>
@@ -38,6 +41,9 @@ export const App = () => {
         )}
         {screen === "mine" && <MyRides app={app} lang={lang} />}
         {screen === "admin" && <Admin app={app} lang={lang} />}
+        <p className="credit">
+          <strong>{t("builtBy", lang)}</strong>
+        </p>
       </main>
 
       <nav className="tabbar" aria-label="Main">

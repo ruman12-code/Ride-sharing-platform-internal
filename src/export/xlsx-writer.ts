@@ -9,7 +9,7 @@ import type { Sheet } from "./excel.js";
  */
 export const writeWorkbook = async (sheets: readonly Sheet[]): Promise<ArrayBuffer> => {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Office Carpool";
+  wb.creator = "Ekpothe";
   wb.created = new Date();
 
   for (const sheet of sheets) {

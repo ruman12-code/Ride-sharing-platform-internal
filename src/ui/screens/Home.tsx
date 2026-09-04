@@ -1,4 +1,5 @@
 import { type Lang, num, t, taka } from "../i18n.js";
+import { Strapline } from "../components/Strapline.jsx";
 import { timeOf, zoneName } from "../components/common.jsx";
 import { userById, type App } from "../store.js";
 
@@ -73,7 +74,12 @@ export const Home = ({
         </div>
       </div>
 
-      <p className="hint" style={{ textAlign: "center", marginTop: 20 }}>{t("tagline", lang)}</p>
+      <p className="section-title">{t("about", lang)}</p>
+      <div className="card">
+        <Strapline lang={lang} />
+        <p className="hint" style={{ marginTop: 14 }}>{t("aboutBody", lang)}</p>
+        <p className="hint" style={{ marginTop: 10, fontWeight: 600 }}>{t("tagline", lang)}</p>
+      </div>
     </div>
   );
 };

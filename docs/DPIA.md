@@ -1,6 +1,6 @@
 # Data Protection Impact Assessment
 
-**System:** Office Carpool — internal ride sharing
+**System:** Ekpothe (একপথে) — internal ride sharing
 **Assessed against:** Personal Data Protection Act 2026 (Bangladesh)
 **Date:** 2026-09-04 · **Status:** Draft for the data protection owner to sign
 **Owner:** *(unassigned — see "Before launch")*

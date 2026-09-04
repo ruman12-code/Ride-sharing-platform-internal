@@ -10,7 +10,8 @@
 export type Lang = "en" | "bn";
 
 export const STRINGS = {
-  appName: { en: "Office Carpool", bn: "অফিস কারপুল" },
+  appName: { en: "Ekpothe", bn: "একপথে" },
+  appNameSub: { en: "on one path", bn: "এক পথে" },
   tagline: {
     en: "Sharing costs, not driving for hire.",
     bn: "খরচ ভাগাভাগি, ভাড়ায় চালানো নয়।",
@@ -182,6 +183,18 @@ export const STRINGS = {
 
   // Admin
   admin: { en: "Admin", bn: "অ্যাডমিন" },
+
+  // About
+  about: { en: "About", bn: "পরিচিতি" },
+  builtBy: { en: "Built for us, by Ruman", bn: "আমাদের জন্য, রুমানের তৈরি" },
+  aboutBody: {
+    en: "Ekpothe replaces the ride-sharing spreadsheet. Same idea, but it comes to you instead of waiting in a folder — and it works from your phone.",
+    bn: "একপথে সেই রাইড শেয়ারিং স্প্রেডশিটের জায়গা নিয়েছে। ভাবনা একই, তবে এটি ফোল্ডারে অপেক্ষা না করে আপনার কাছে আসে — এবং ফোন থেকেই চলে।",
+  },
+  straplineBn: {
+    en: "Going the same way? Share the ride, split the fuel.",
+    bn: "একই পথে যাচ্ছেন? একসাথে যান, খরচ ভাগ করুন।",
+  },
   exportExcel: { en: "Export to Excel", bn: "এক্সেলে ডাউনলোড" },
   exportHint: {
     en: "Rides, bookings, balances, impact and fuel prices. A snapshot — nothing reads it back.",

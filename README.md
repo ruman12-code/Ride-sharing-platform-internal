@@ -1,4 +1,6 @@
-# Internal carpooling — organisation ride sharing, Dhaka
+# Ekpothe (একপথে) — *on one path*
+
+Ride sharing for colleagues, in Dhaka. Built for us, by Ruman.
 
 Replaces the macro-enabled Excel workbook that ran Aug 2023 – Jan 2024.
 
@@ -46,6 +48,8 @@ Read [`docs/LEGACY_AUDIT.md`](docs/LEGACY_AUDIT.md) before changing anything.
 | [`docs/LIQUIDITY_BASELINE.md`](docs/LIQUIDITY_BASELINE.md) | The "before" measurement, and why it cannot carry the weight the brief puts on it |
 | [`docs/ADR-001-architecture.md`](docs/ADR-001-architecture.md) | Decision, rejected options, what would reverse it |
 | [`docs/ADR-002-routing.md`](docs/ADR-002-routing.md) | Computed routing, and why Google Maps is built but disabled |
+| [`docs/ADR-003-name-and-attribution.md`](docs/ADR-003-name-and-attribution.md) | The name, and the acrostic |
+| [`server/README.md`](server/README.md) | The pilot server — running it without SharePoint |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | How to run it, and what does not work yet |
 | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | For colleagues and administrators |
 | [`docs/DPIA.md`](docs/DPIA.md) | Data protection impact assessment — **unsigned** |

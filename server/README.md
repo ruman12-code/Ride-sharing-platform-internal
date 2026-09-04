@@ -1,4 +1,4 @@
-# Standalone pilot server
+# Ekpothe — standalone pilot server
 
 Runs the app without SharePoint, so you can put it in front of colleagues now
 and decide later whether it is worth pitching to management.
