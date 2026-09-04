@@ -15,6 +15,13 @@ export interface Zone {
   readonly nameBn: string;
   readonly lat: number;
   readonly lng: number;
+  /**
+   * Named routes this zone belongs to, for reporting only.
+   *
+   * Never a routing input. Routes are computed between any two zones from
+   * geography; a hand-maintained corridor list meant a journey nobody had
+   * anticipated could not be offered.
+   */
   readonly corridorIds: readonly Id[];
   /**
    * Spellings that resolve to this zone, lowercased.
@@ -23,14 +30,6 @@ export interface Zone {
    * colleagues' habits both land on the right zone.
    */
   readonly aliases: readonly string[];
-}
-
-/** A named commuting route. Zones in travel order. */
-export interface Corridor {
-  readonly id: Id;
-  readonly nameEn: string;
-  readonly nameBn: string;
-  readonly zoneIds: readonly Id[];
 }
 
 /** Resolve a free-text spelling to a zone. Used by migration and search only. */

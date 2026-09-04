@@ -193,3 +193,56 @@ describe("zero results", () => {
     expect(search([northbound], query({ originZoneId: "savar" }))).toEqual([]);
   });
 });
+
+/**
+ * Item 3: any point on a driver's computed route is a legitimate pickup or
+ * drop-off. These tests pin that behaviour against a route produced by the zone
+ * graph rather than a hand-written sequence, so they fail if routing and
+ * matching ever drift apart.
+ */
+describe("boarding anywhere along a computed route", () => {
+  it("matches a rider joining partway and leaving partway", async () => {
+    const { ZoneGraphPlanner } = await import("../../adapters/routing/zone-graph.js");
+    const { ZONES } = await import("../../adapters/local-json/seed/zones.js");
+    const planner = new ZoneGraphPlanner(ZONES);
+    const computed = (await planner.plan("uttara", "gulshan-2"))!;
+
+    const driverRide = ride({
+      id: "r-computed",
+      zoneSequence: computed.zoneSequence,
+      distanceKm: computed.distanceKm,
+      seatsTotal: 3,
+      seatsAvailable: 3,
+    });
+
+    // Every ordered pair of stops on the route must be bookable.
+    const seq = computed.zoneSequence;
+    let pairsChecked = 0;
+    for (let i = 0; i < seq.length; i += 1) {
+      for (let j = i + 1; j < seq.length; j += 1) {
+        const results = search(
+          [driverRide],
+          query({ originZoneId: seq[i]!, destinationZoneId: seq[j]! }),
+        );
+        expect(results, `${seq[i]} -> ${seq[j]}`).toHaveLength(1);
+        pairsChecked += 1;
+      }
+    }
+    expect(pairsChecked).toBeGreaterThan(2);
+  });
+
+  it("still refuses the reverse direction along the same route", async () => {
+    const { ZoneGraphPlanner } = await import("../../adapters/routing/zone-graph.js");
+    const { ZONES } = await import("../../adapters/local-json/seed/zones.js");
+    const planner = new ZoneGraphPlanner(ZONES);
+    const computed = (await planner.plan("uttara", "gulshan-2"))!;
+    const seq = computed.zoneSequence;
+
+    const driverRide = ride({ id: "r-computed", zoneSequence: seq });
+    const results = search(
+      [driverRide],
+      query({ originZoneId: seq.at(-1)!, destinationZoneId: seq[0]! }),
+    );
+    expect(results).toHaveLength(0);
+  });
+});

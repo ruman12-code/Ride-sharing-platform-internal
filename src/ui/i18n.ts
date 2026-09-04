@@ -44,6 +44,38 @@ export const STRINGS = {
     en: "We filled this in from your corridor. Tap to remove a stop.",
     bn: "আপনার রুট থেকে দেওয়া হয়েছে। বাদ দিতে ট্যাপ করুন।",
   },
+  yourRoute: { en: "Your route", bn: "আপনার রুট" },
+  calculatingRoute: { en: "Working out the best route…", bn: "সেরা রুট বের করা হচ্ছে…" },
+  noRoute: {
+    en: "We couldn't work out a route between those two places.",
+    bn: "এই দুই জায়গার মধ্যে কোনো রুট বের করা গেল না।",
+  },
+  routeHint: {
+    en: "Colleagues can join or get off at any of these stops. Tap one to remove it.",
+    bn: "সহকর্মীরা এই যেকোনো জায়গায় উঠতে বা নামতে পারেন। বাদ দিতে ট্যাপ করুন।",
+  },
+  minutes: { en: "min", bn: "মিনিট" },
+  estimated: { en: "Estimated", bn: "আনুমানিক" },
+  liveTraffic: { en: "Live traffic", bn: "সরাসরি ট্রাফিক" },
+  anyStopOnRoute: { en: "Any stop on the route", bn: "রুটের যেকোনো জায়গা" },
+
+  /**
+   * The declaration, carried over verbatim from the legacy entry form.
+   *
+   * Source: `UserForm1`, label `Label9x7`, in
+   * `Ride_sharing_platformFinal29012024.xlsm`. It appeared above the fields in
+   * the original UserForm and is reproduced here word for word rather than
+   * rewritten, because it is the organisation's own wording and the basis on
+   * which colleagues previously entered their details.
+   *
+   * If this text ever needs to change, that is a decision for whoever owns the
+   * policy, not an editorial tidy-up.
+   */
+  declaration: {
+    en: "You are entering your Ride sharing information by yourself, voluntarily",
+    bn: "আপনি নিজের ইচ্ছায়, স্বেচ্ছায় আপনার রাইড শেয়ারিং তথ্য দিচ্ছেন",
+  },
+
   repeatWeekly: { en: "Repeat weekly", bn: "সাপ্তাহিক পুনরাবৃত্তি" },
   repeatWeeklyHint: {
     en: "Set it once. Confirm each day from a notification.",

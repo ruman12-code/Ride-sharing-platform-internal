@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { DayOfWeek } from "../../domain/types.js";
 import type { Ride } from "../../domain/entities/ride.js";
-import { suggestViaZones } from "../../adapters/local-json/seed/zones.js";
+import type { Route } from "../../domain/matching/geo.js";
 import { validatePublish } from "../../domain/policy/invariants.js";
 import { type Lang, num, t, taka } from "../i18n.js";
 import { Progress, Stepper, Toggle, ZonePicker, zoneName } from "../components/common.jsx";
@@ -54,25 +54,50 @@ export const OfferFlow = ({
   const [prefs, setPrefs] = useState({ womenOnly: false, ac: true, luggage: false, quiet: false });
   const [share, setShare] = useState<number | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const [route, setRoute] = useState<Route | undefined>();
+  const [routing, setRouting] = useState(false);
 
-  // Pre-populate the via zones from the corridor graph the moment both ends are
-  // known. The legacy Route column was blank in 13 of 20 rows because the submit
-  // handler silently dropped it (L-03) — a suggestion the driver confirms is
-  // both faster than typing and verifiable end to end.
+  // The route is computed between whatever two zones the driver picked. There
+  // is no corridor list, so a journey nobody anticipated works exactly as well
+  // as the ones everybody expected.
+  //
+  // Every zone on the returned route is a legitimate boarding or alighting
+  // point, which is what lets a rider join partway along.
+  useEffect(() => {
+    if (!origin || !destination) {
+      setRoute(undefined);
+      return;
+    }
+    let cancelled = false;
+    setRouting(true);
+    void app.planRoute(origin, destination).then((r) => {
+      if (cancelled) return;
+      setRoute(r);
+      setRouting(false);
+      // A fresh pair of endpoints means the previous hand-edit no longer
+      // applies; keeping it would publish stops from a different journey.
+      setViaTouched(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [app, origin, destination]);
+
   const suggested = useMemo(
-    () => (origin && destination ? suggestViaZones(origin, destination) : []),
-    [origin, destination],
+    () => (route ? route.zoneSequence.slice(1, -1) : []),
+    [route],
   );
   const effectiveVia = viaTouched ? via : suggested;
 
-  // Distance stands in for a routing call, which Phase 1 does not make: roughly
-  // 6 km between endpoints plus 2.5 km per intermediate stop. It must be based
-  // on the stops actually being published, not on the `via` state — those differ
-  // until the driver edits the suggestion, and reading the wrong one priced a
-  // 7-stop Uttara-Gulshan run as a 6 km trip.
-  //
-  // Crude on purpose, and replaced wholesale when a geocoder adapter lands.
-  const distanceKm = useMemo(() => 6 + effectiveVia.length * 2.5, [effectiveVia.length]);
+  // Distance comes from the planner. When the driver removes a stop the route
+  // shortens, so the figure is scaled by the fraction of stops kept rather than
+  // left overstating a journey that is no longer being made.
+  const distanceKm = useMemo(() => {
+    if (!route) return 0;
+    if (!viaTouched || suggested.length === 0) return route.distanceKm;
+    const kept = (effectiveVia.length + 2) / (suggested.length + 2);
+    return Math.max(1, Math.round(route.distanceKm * kept * 10) / 10);
+  }, [route, viaTouched, suggested.length, effectiveVia.length]);
   const breakdown = useMemo(() => shareFor(distanceKm, seats), [distanceKm, seats]);
   const working = useMemo(() => explain(distanceKm, seats), [distanceKm, seats]);
   const cap = breakdown.sharePerSeat;
@@ -123,10 +148,25 @@ export const OfferFlow = ({
     onDone();
   };
 
-  const canNext = [Boolean(origin && destination), Boolean(time), seats >= 1, true][step];
+  const canNext = [
+    Boolean(origin && destination && route && !routing),
+    Boolean(time),
+    seats >= 1,
+    true,
+  ][step];
 
   return (
     <div>
+      {/*
+        The declaration from the legacy entry form, kept word for word and put
+        where it cannot be missed: above the fields, on every step, never
+        collapsible. It is the organisation's own wording.
+      */}
+      <div className="declaration" role="note">
+        <span className="mark" aria-hidden="true">✍️</span>
+        <p>{t("declaration", lang)}</p>
+      </div>
+
       <Progress step={step} total={4} lang={lang} />
       <h2 className="h2">{t(STEP_TITLES[step]!, lang)}</h2>
 
@@ -158,25 +198,46 @@ export const OfferFlow = ({
 
           {origin && destination && (
             <div className="card">
-              <span className="label">{t("passingThrough", lang)}</span>
-              <div className="chips">
-                {effectiveVia.length === 0 && <span className="hint">—</span>}
-                {effectiveVia.map((zid) => (
-                  <button
-                    key={zid}
-                    type="button"
-                    className="chip via small"
-                    onClick={() => {
-                      setViaTouched(true);
-                      setVia(effectiveVia.filter((v) => v !== zid));
-                    }}
-                    aria-label={`Remove ${zoneName(zid, "en")}`}
-                  >
-                    {zoneName(zid, lang)} ✕
-                  </button>
-                ))}
-              </div>
-              <p className="hint">{t("passingThroughHint", lang)}</p>
+              <span className="label">{t("yourRoute", lang)}</span>
+
+              {routing && (
+                <div className="skel" style={{ height: 72 }} aria-live="polite">
+                  <span className="sr-only">{t("calculatingRoute", lang)}</span>
+                </div>
+              )}
+
+              {!routing && !route && <p className="notice warn">{t("noRoute", lang)}</p>}
+
+              {!routing && route && (
+                <>
+                  <div className="routeline">
+                    <span className="routeend">{zoneName(origin, lang)}</span>
+                    {effectiveVia.map((zid) => (
+                      <button
+                        key={zid}
+                        type="button"
+                        className="chip via small"
+                        onClick={() => {
+                          setViaTouched(true);
+                          setVia(effectiveVia.filter((v) => v !== zid));
+                        }}
+                        aria-label={`Remove ${zoneName(zid, "en")}`}
+                      >
+                        {zoneName(zid, lang)} ✕
+                      </button>
+                    ))}
+                    <span className="routeend">{zoneName(destination, lang)}</span>
+                  </div>
+                  <div className="meta">
+                    <span><strong>{num(distanceKm, lang)} km</strong></span>
+                    <span>~{num(route.durationMinutes, lang)} {t("minutes", lang)}</span>
+                    <span className="badge muted">
+                      {route.isEstimate ? t("estimated", lang) : t("liveTraffic", lang)}
+                    </span>
+                  </div>
+                  <p className="hint">{t("routeHint", lang)}</p>
+                </>
+              )}
             </div>
           )}
         </>

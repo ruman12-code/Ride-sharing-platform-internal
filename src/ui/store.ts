@@ -3,6 +3,8 @@ import type { Booking, CounterfactualMode, SettlementMode } from "../domain/enti
 import type { Ride } from "../domain/entities/ride.js";
 import type { User } from "../domain/entities/user.js";
 import { ZONES, zoneById } from "../adapters/local-json/seed/zones.js";
+import { ZoneGraphPlanner } from "../adapters/routing/zone-graph.js";
+import { ZoneGraph, type Route } from "../domain/matching/geo.js";
 import { FUEL_PRICES } from "../adapters/local-json/seed/fuel.js";
 import { priceOnDate, effectiveKmPerLitre } from "../domain/pricing/fuel.js";
 import { calculateCostShare, explainCostShare } from "../domain/pricing/cost-share.js";
@@ -65,10 +67,33 @@ export const explain = (distanceKm: number, riders: number) =>
 
 export const ACTIVE_FUEL_PRICE = octane;
 
+const graph = new ZoneGraph(ZONES);
+
+/**
+ * A demo ride, routed the same way a real one is.
+ *
+ * The zone sequence and distance come from the router rather than being written
+ * by hand, so the seeded data exercises the same code path a colleague does and
+ * cannot drift away from it.
+ */
 const seedRide = (
   id: string,
   driverId: string,
-  zoneSequence: string[],
+  from: string,
+  to: string,
+  time: string,
+  seatsTotal: number,
+  over: Partial<Ride> = {},
+): Ride => {
+  const route = graph.route(from, to);
+  if (!route) throw new Error(`no route for demo ride ${id}: ${from} -> ${to}`);
+  return seedRideFrom(id, driverId, route.zoneSequence, time, seatsTotal, route.distanceKm, over);
+};
+
+const seedRideFrom = (
+  id: string,
+  driverId: string,
+  zoneSequence: readonly string[],
   time: string,
   seatsTotal: number,
   distanceKm: number,
@@ -97,19 +122,28 @@ const seedRide = (
 });
 
 const SEED_RIDES: Ride[] = [
-  seedRide("r-1", "u-rezaul", ["uttara", "airport", "khilkhet", "banani", "gulshan-2"], "07:45", 3, 14),
-  seedRide("r-2", "u-farhana", ["uttara", "khilkhet", "300-feet", "notun-bazar", "gulshan-2"], "08:10", 2, 16, {
+  seedRide("r-1", "u-rezaul", "uttara", "gulshan-2", "07:45", 3),
+  seedRide("r-2", "u-farhana", "uttara-11", "gulshan-2", "08:10", 2, {
     preferences: { womenOnly: true, ac: true, luggage: false, quiet: true },
   }),
-  seedRide("r-3", "u-tanvir", ["mirpur-10", "kalshi", "agargaon", "banani", "gulshan-2"], "07:30", 2, 12),
-  seedRide("r-4", "u-shirin", ["mirpur-12", "mirpur-10", "shewrapara", "agargaon", "gulshan-2"], "08:00", 1, 13),
-  seedRide("r-5", "u-rezaul", ["gulshan-1", "mohakhali", "bijoy-sarani", "dhanmondi", "lalmatia"], "17:45", 3, 11),
+  seedRide("r-3", "u-tanvir", "mirpur-10", "gulshan-2", "07:30", 2),
+  seedRide("r-4", "u-shirin", "mirpur-12", "gulshan-2", "08:00", 1),
+  seedRide("r-5", "u-rezaul", "gulshan-1", "mohammadpur", "17:45", 3),
 ];
 
 export interface AppState {
   readonly rides: readonly Ride[];
   readonly bookings: readonly Booking[];
 }
+
+/**
+ * The active route planner.
+ *
+ * Defaults to the local zone graph: no network, no cost, no journey data
+ * leaving the tenant. Swapping in GoogleDirectionsPlanner is a deliberate
+ * organisational decision, not a config tweak — see docs/ADR-002-routing.md.
+ */
+export const planner = new ZoneGraphPlanner(ZONES);
 
 export const useApp = () => {
   const [rides, setRides] = useState<readonly Ride[]>(SEED_RIDES);
@@ -235,9 +269,15 @@ export const useApp = () => {
     [rides],
   );
 
+  const planRoute = useCallback(
+    (originZoneId: string, destinationZoneId: string): Promise<Route | undefined> =>
+      planner.plan(originZoneId, destinationZoneId),
+    [],
+  );
+
   return {
     rides, bookings, myBookings, myRides, alerts,
-    search, book, publish, addAlert, corridorActivity,
+    search, book, publish, addAlert, corridorActivity, planRoute,
     today: TODAY, dateOf,
   };
 };

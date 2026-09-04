@@ -1,4 +1,4 @@
-import type { Corridor, Zone } from "../../../domain/entities/zone.js";
+import type { Zone } from "../../../domain/entities/zone.js";
 
 /**
  * Seeded zone reference data. There are no free-text locations anywhere.
@@ -15,15 +15,25 @@ import type { Corridor, Zone } from "../../../domain/entities/zone.js";
  * distance. Replace them when a geocoder adapter (Barikoi, Mapbox) lands.
  */
 
+/**
+ * Zones carry no corridor membership.
+ *
+ * An earlier version seeded a hand-maintained corridor list and derived every
+ * route from it, which meant a journey nobody had anticipated could not be
+ * offered at all. Routes are now computed between any two zones from geography
+ * (`domain/matching/geo.ts`), so the zone table describes places and nothing
+ * else. The third argument is retained in the seed calls purely to keep the
+ * table readable and is discarded.
+ */
 const z = (
   id: string,
   nameEn: string,
   nameBn: string,
   lat: number,
   lng: number,
-  corridorIds: string[],
+  _unusedCorridorIds: string[],
   aliases: string[] = [],
-): Zone => ({ id, nameEn, nameBn, lat, lng, corridorIds, aliases });
+): Zone => ({ id, nameEn, nameBn, lat, lng, corridorIds: [], aliases });
 
 export const ZONES: readonly Zone[] = [
   // --- Northern corridor: Uttara / Airport / 300 Feet -> Gulshan ---------
@@ -105,59 +115,4 @@ export const ZONES: readonly Zone[] = [
   z("narayanganj", "Narayanganj", "নারায়ণগঞ্জ", 23.6238, 90.4990, [], ["narayangonj"]),
 ];
 
-/**
- * Named corridors. Ordered zone lists used to pre-populate "passing through?"
- * in the offer flow, so a driver is never facing a blank box.
- *
- * These three were confirmed by the sponsor and are visible in the legacy data.
- */
-export const CORRIDORS: readonly Corridor[] = [
-  {
-    id: "c-north",
-    nameEn: "Uttara / Khilkhet / 300 Feet → Gulshan",
-    nameBn: "উত্তরা / খিলক্ষেত / ৩০০ ফিট → গুলশান",
-    zoneIds: [
-      "uttara", "airport", "khilkhet", "300-feet", "kuril",
-      "jamuna-future-park", "notun-bazar", "badda", "gulshan-2", "gulshan-1",
-    ],
-  },
-  {
-    id: "c-west",
-    nameEn: "Mirpur → Gulshan",
-    nameBn: "মিরপুর → গুলশান",
-    zoneIds: [
-      "mirpur-12", "mirpur-11", "mirpur-10", "kalshi", "kazipara",
-      "shewrapara", "agargaon", "banani", "gulshan-2", "gulshan-1",
-    ],
-  },
-  {
-    id: "c-south",
-    nameEn: "Gulshan → Dhanmondi / Mohammadpur",
-    nameBn: "গুলশান → ধানমন্ডি / মোহাম্মদপুর",
-    zoneIds: [
-      "gulshan-1", "mohakhali", "bijoy-sarani", "farmgate",
-      "dhanmondi", "lalmatia", "mohammadpur",
-    ],
-  },
-];
-
 export const zoneById = (id: string): Zone | undefined => ZONES.find((zone) => zone.id === id);
-
-/**
- * Zones the driver probably passes through, from the corridor graph.
- *
- * Pre-populating this is a direct response to the audit: the legacy Route
- * column was blank in 13 of 20 rows, and the cause was a commented-out write in
- * the submit handler rather than user laziness (L-03). A suggestion the driver
- * confirms is both faster than typing and verifiable end to end.
- */
-export const suggestViaZones = (originId: string, destinationId: string): readonly string[] => {
-  for (const corridor of CORRIDORS) {
-    const from = corridor.zoneIds.indexOf(originId);
-    const to = corridor.zoneIds.indexOf(destinationId);
-    if (from !== -1 && to !== -1 && from < to) {
-      return corridor.zoneIds.slice(from + 1, to);
-    }
-  }
-  return [];
-};
