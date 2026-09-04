@@ -6,6 +6,60 @@ import { userById, type App } from "../store.js";
 
 type Tab = "upcoming" | "past" | "offering";
 
+/**
+ * The counterpart's contact details, on request.
+ *
+ * Fetched when asked for rather than delivered with the booking: the release is
+ * an event that gets recorded, so it happens when somebody actually needs the
+ * number, not every time the screen renders.
+ */
+const ContactRow = ({
+  app, lang, bookingId,
+}: {
+  app: App;
+  lang: Lang;
+  bookingId: string;
+}) => {
+  const [shown, setShown] = useState<{ name: string; value: string } | undefined>();
+  // Only after the answer comes back. Showing "they have no number" while the
+  // request is still in flight tells people something untrue for a moment,
+  // which on this particular screen is enough to make them stop asking.
+  const [noneOnFile, setNoneOnFile] = useState(false);
+
+  if (shown) {
+    return (
+      <div className="notice good" style={{ marginTop: 10 }}>
+        <div style={{ fontSize: 13 }}>{shown.name}</div>
+        <a className="contact-value" href={`tel:${shown.value.replace(/\s+/g, "")}`}>
+          {shown.value}
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        className="btn secondary block"
+        style={{ marginTop: 10 }}
+        onClick={() => {
+          void app.revealContact(bookingId).then((c) => {
+            if (c) setShown({ name: c.name, value: c.value });
+            else setNoneOnFile(true);
+          });
+        }}
+      >
+        {t("getTheirNumber", lang)}
+      </button>
+      {/*
+        Said plainly rather than shown as an error. A colleague who has not
+        added a number is not a failure, and inventing one would be worse.
+      */}
+      {noneOnFile && <p className="hint" style={{ marginTop: 6 }}>{t("theirNumberHidden", lang)}</p>}
+    </>
+  );
+};
+
 export const MyRides = ({ app, lang }: { app: App; lang: Lang }) => {
   const [tab, setTab] = useState<Tab>("upcoming");
   const [rating, setRating] = useState<string | undefined>();
@@ -71,13 +125,23 @@ export const MyRides = ({ app, lang }: { app: App; lang: Lang }) => {
                   </div>
                 </div>
 
+                {/*
+                  A confirmed seat is the moment the two of them need to speak,
+                  so the number is offered here and only here. It said
+                  "Completed trips" before — a metrics label on a button, which
+                  told a rider nothing about what tapping it would do.
+                */}
+                {r.bookingId && r.status === "confirmed" && (
+                  <ContactRow app={app} lang={lang} bookingId={r.bookingId} />
+                )}
+
                 {r.bookingId && r.status !== "completed" && (
                   <button
                     className="btn secondary block"
                     style={{ marginTop: 10 }}
                     onClick={() => app.completeTrip(r.bookingId!)}
                   >
-                    ✓ {t("completedTrips", lang)}
+                    ✓ {t("markDone", lang)}
                   </button>
                 )}
 

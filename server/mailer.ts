@@ -14,7 +14,18 @@ import { createTransport, type Transporter } from "nodemailer";
  * person asking.
  */
 export interface Mailer {
+  /** True when SMTP settings are present. Says nothing about whether they work. */
   readonly enabled: boolean;
+  /**
+   * Actually open a connection and authenticate.
+   *
+   * `enabled` only means the settings are non-empty, which is satisfied just as
+   * well by a placeholder as by a real relay. A wrong password, a blocked port,
+   * or a leftover `SMTP_HOST=localhost` all look identical until something is
+   * sent — and the first thing sent is the mail telling a colleague they were
+   * approved. Better to find out at boot than to find out from the colleague.
+   */
+  verify(): Promise<{ ok: boolean; error?: string }>;
   send(to: string, subject: string, text: string): Promise<boolean>;
 }
 
@@ -25,6 +36,9 @@ export const createMailer = (): Mailer => {
   if (!host || !from) {
     return {
       enabled: false,
+      async verify() {
+        return { ok: false, error: "SMTP_HOST and SMTP_FROM are not set" };
+      },
       async send() {
         return false;
       },
@@ -46,6 +60,14 @@ export const createMailer = (): Mailer => {
 
   return {
     enabled: true,
+    async verify() {
+      try {
+        await transport.verify();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
     async send(to, subject, text) {
       try {
         await transport.sendMail({ from, to, subject, text });

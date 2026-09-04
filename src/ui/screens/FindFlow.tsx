@@ -133,7 +133,8 @@ export const FindFlow = ({
       {searched && results.length > 0 && (
         <>
           <p className="section-title">
-            {num(results.length, lang)} {t("resultsCount", lang)}
+            {num(results.length, lang)}{" "}
+            {t(results.length === 1 ? "resultsCountOne" : "resultsCount", lang)}
           </p>
           <div className="card flush">
             {results.map((m) => {

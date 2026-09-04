@@ -59,6 +59,15 @@ export class Accounts {
   constructor(
     private readonly db: Db,
     private readonly blockedDomains: readonly string[],
+    /**
+     * The administrator's own address.
+     *
+     * Registering with it is approved immediately and as an admin. Somebody has
+     * to be able to approve the first colleague, and an admin row seeded
+     * without a password simply cannot sign in — which is exactly the lockout
+     * an earlier version shipped.
+     */
+    private readonly adminEmail: string = "",
   ) {}
 
   register(input: RegistrationInput): RegistrationResult {
@@ -68,17 +77,27 @@ export class Accounts {
       return { ok: false, message: "That doesn't look like an email address." };
     }
 
+    const isAdmin = this.adminEmail !== "" && email === this.adminEmail.trim().toLowerCase();
+
     // Refused loudly and with the reason, because a colleague reaching for
     // their work address is doing the natural thing and deserves to know why
     // it is the wrong one here.
+    //
+    // The administrator is NOT exempt. Exempting them would put an employer
+    // address in the one row everybody sees, which is exactly the claim this
+    // rule exists to keep true. An ADMIN_EMAIL on a blocked domain is a
+    // configuration mistake, and the reply says so rather than leaving the
+    // operator to guess.
     if (isWorkAddress(email, this.blockedDomains)) {
       return {
         ok: false,
         workAddress: true,
-        message:
-          "Please use a personal email address, not your work one. " +
-          "Ekpothe is a colleague's own project, and keeping work addresses out " +
-          "of it is deliberate — it means your employer's data is not involved.",
+        message: isAdmin
+          ? "ADMIN_EMAIL is set to a work address, which this server refuses to " +
+            "store. Restart with a personal address as ADMIN_EMAIL."
+          : "Please use a personal email address, not your work one. " +
+            "Ekpothe is a colleague's own project, and keeping work addresses out " +
+            "of it is deliberate — it means your employer's data is not involved.",
       };
     }
 
@@ -104,22 +123,29 @@ export class Accounts {
     const existing = this.db.get<{ id: string }>("SELECT id FROM users WHERE email = ?", email);
     if (existing) return same;
 
+    const adminWelcome: RegistrationResult = {
+      ok: true,
+      message: "You're the administrator — signed up and approved. Sign in now.",
+    };
+
     const salt = randomBytes(16).toString("hex");
     this.db.run(
       `INSERT INTO users
-         (id, displayName, email, status, passwordHash, passwordSalt,
+         (id, displayName, email, status, role, passwordHash, passwordSalt,
           officialName, department, createdAt)
-       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       randomUUID(),
       input.displayName.trim().slice(0, 80),
       email,
+      isAdmin ? "approved" : "pending",
+      isAdmin ? "admin" : "member",
       hash(input.password, salt),
       salt,
       input.officialName?.trim().slice(0, 120) || null,
       input.department?.trim().slice(0, 80) || null,
       new Date().toISOString(),
     );
-    return same;
+    return isAdmin ? adminWelcome : same;
   }
 
   /**

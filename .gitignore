@@ -9,3 +9,6 @@ playwright-report/
 test-results/
 dist-server/
 carpool.db*
+.env.local
+.env
+tsconfig.tsbuildinfo

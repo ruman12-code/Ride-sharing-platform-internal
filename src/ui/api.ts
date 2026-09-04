@@ -78,7 +78,29 @@ export const api = {
     return request("/api/people");
   },
 
-  async me(): Promise<ApiResult<{ userId: string; displayName: string; role: string }>> {
+  async me(): Promise<ApiResult<{ userId: string; displayName: string; role: string; hasContact: boolean }>> {
     return request("/api/me");
+  },
+
+  /**
+   * Store how colleagues may reach you.
+   *
+   * Held once, shown to nobody by default. There is no directory to browse:
+   * the only way this ever reaches another colleague is the reveal below, on a
+   * booking the driver has accepted.
+   */
+  async setContact(kind: string, value: string): Promise<ApiResult<{ ok: boolean }>> {
+    return request("/api/contact", { method: "PUT", body: JSON.stringify({ kind, value }) });
+  },
+
+  /**
+   * Ask for the other person's details on a confirmed booking.
+   *
+   * The server refuses unless this booking is yours and the driver has
+   * accepted, and records the release either way — so "who has my number?" has
+   * an answer.
+   */
+  async revealContact(bookingId: string): Promise<ApiResult<{ name: string; kind: string; value: string }>> {
+    return request("/api/contact", { method: "POST", body: JSON.stringify({ bookingId }) });
   },
 };

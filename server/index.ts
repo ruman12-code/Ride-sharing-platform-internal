@@ -9,7 +9,6 @@ import { Access, parseAllowedDomains } from "./access.js";
 import { accessCodeEmail, createMailer } from "./mailer.js";
 import { Accounts, parseBlockedDomains } from "./accounts.js";
 import { Notifier, notifications } from "./notify.js";
-import { FUEL_PRICES } from "../src/adapters/local-json/seed/fuel.js";
 
 /**
  * Standalone pilot server.
@@ -62,6 +61,25 @@ const SECURE = OWN_TLS || TRUST_PROXY;
  * "anyone", because the failure mode of a permissive default here is a stranger
  * inside the app and nobody noticing.
  */
+/**
+ * Load `.env.local` if it is there.
+ *
+ * Done before anything reads `process.env`, so a value set in the file behaves
+ * exactly as one exported in the shell. Real environment variables win: a
+ * hosting platform's settings must not be overridden by a file that happened to
+ * be committed by accident.
+ */
+{
+  const envFile = join(process.cwd(), ".env.local");
+  if (existsSync(envFile) && typeof process.loadEnvFile === "function") {
+    try {
+      process.loadEnvFile(envFile);
+    } catch (e) {
+      console.error("could not read .env.local:", e);
+    }
+  }
+}
+
 const ACCESS_MODE = process.env["ACCESS_MODE"] === "domain" ? "domain" : "invite";
 const ALLOWED_DOMAINS = parseAllowedDomains(process.env["ALLOWED_EMAIL_DOMAINS"]);
 
@@ -127,7 +145,7 @@ const VAPID_PUBLIC = process.env["VAPID_PUBLIC_KEY"];
 const VAPID_PRIVATE = process.env["VAPID_PRIVATE_KEY"];
 
 const mailer = createMailer();
-const accounts = new Accounts(db, BLOCKED_DOMAINS);
+const accounts = new Accounts(db, BLOCKED_DOMAINS, ADMIN_EMAIL);
 const notifier = new Notifier(
   db,
   mailer,
@@ -150,38 +168,15 @@ const access = new Access(db, {
   ipPepper: randomUUID(),
 });
 
-// Seed the administrator, approved and with a code, so there is a way in on a
-// brand-new database.
-{
-  const existing = db.get<{ id: string; status: string }>(
-    "SELECT id, status FROM users WHERE email = ?",
-    ADMIN_EMAIL,
-  );
-  if (!existing) {
-    const id = randomUUID();
-    db.run(
-      `INSERT INTO users (id, displayName, email, role, status, createdAt)
-       VALUES (?, ?, ?, 'admin', 'pending', ?)`,
-      id,
-      ACCESS_MODE === "invite" ? "Admin" : ADMIN_EMAIL.split("@")[0],
-      ADMIN_EMAIL,
-      new Date().toISOString(),
-    );
-    const issued = access.approve(id, "system");
-    console.log("");
-    console.log(`  ADMIN CODE: ${issued?.code}`);
-    console.log("  Use it once to sign in. It is not stored and will not be shown again.");
-  }
-}
-
-// Seed the dated fuel prices once, so cost shares are computable on first run.
-for (const p of FUEL_PRICES) {
-  db.run(
-    `INSERT OR IGNORE INTO fuel_prices (id, fuelType, pricePerLitre, effectiveFrom, source, confirmedAt)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    p.id, p.fuelType, p.pricePerLitre, p.effectiveFrom, p.source, p.confirmedAt ?? null,
-  );
-}
+/**
+ * There is no seeded administrator row.
+ *
+ * An earlier version created one with an invite code and no password, which
+ * could not sign in at all once the door asked for a password — the
+ * administrator was locked out of their own pilot. Instead, registering with
+ * `ADMIN_EMAIL` is approved immediately and as an admin, so the administrator
+ * joins by exactly the route everybody else does.
+ */
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -250,13 +245,34 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         // Open endpoints: asking for access, and redeeming a code.
         if (url.pathname === "/api/register" && req.method === "POST") {
           const b = await body(req);
-          return send(200, accounts.register({
-            email: String(b["email"] ?? ""),
+          const email = String(b["email"] ?? "").trim().toLowerCase();
+          const result = accounts.register({
+            email,
             password: String(b["password"] ?? ""),
             displayName: String(b["displayName"] ?? ""),
             ...(b["officialName"] ? { officialName: String(b["officialName"]) } : {}),
             ...(b["department"] ? { department: String(b["department"]) } : {}),
-          }));
+          });
+
+          // Tell the administrator somebody is waiting. Deliberately after the
+          // reply is composed and never awaited into it: a mail server that is
+          // slow or down must not make registration look like it failed.
+          if (result.ok) {
+            const admin = db.get<{ id: string }>(
+              "SELECT id FROM users WHERE role = 'admin' AND status = 'approved' ORDER BY createdAt LIMIT 1",
+            );
+            // Matched on email, which is unique. Matching on display name
+            // would pick the wrong colleague the first time two of them share
+            // a first name, which in an office of this size is a matter of
+            // when rather than whether.
+            const waiting = accounts.pending().find((u) => u.email === email);
+            if (admin && waiting) {
+              void notifier
+                .send(notifications.registrationReceived(admin.id, waiting.id, waiting.displayName))
+                .catch(() => {});
+            }
+          }
+          return send(200, result);
         }
 
         if (url.pathname === "/api/login" && req.method === "POST") {
@@ -284,15 +300,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         }
 
         if (url.pathname === "/api/request-access" && req.method === "POST") {
-          console.log(
-    notifier.canPush
-      ? "  notify:     push + email"
-      : mailer.enabled
-        ? "  notify:     email only — set VAPID keys to reach phones directly"
-        : "  notify:     NONE — colleagues must open the app to see requests",
-  );
-  console.log(`  register:   self-registration on, ${BLOCKED_DOMAINS.map((d) => `@${d}`).join(", ")} blocked`);
-  if (ACCESS_MODE === "invite") {
+          if (ACCESS_MODE === "invite") {
             return send(200, {
               ok: false,
               inviteOnly: true,
@@ -346,7 +354,15 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         }
 
         if (url.pathname === "/api/me") {
-          return session ? send(200, session) : send(401, { error: "Not signed in." });
+          if (!session) return send(401, { error: "Not signed in." });
+          // Whether a contact detail is on file, never the detail itself. The
+          // app needs to know to ask for one; nothing needs it echoed back on
+          // every page load.
+          const row = db.get<{ contactValue: string | null }>(
+            "SELECT contactValue FROM users WHERE id = ?",
+            session.userId,
+          );
+          return send(200, { ...session, hasContact: Boolean(row?.contactValue) });
         }
 
         if (!session) return send(401, { error: "Not signed in." });
@@ -478,10 +494,16 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           }
           if (url.pathname === "/api/admin/approve" && req.method === "POST") {
             const b = await body(req);
-            const issued = access.approve(String(b["userId"] ?? ""), session.userId);
-            return issued
-              ? send(200, issued)
-              : send(404, { error: "No such request." });
+            const userId = String(b["userId"] ?? "");
+            const issued = access.approve(userId, session.userId);
+            if (!issued) return send(404, { error: "No such request." });
+            // Approval nobody is told about is indistinguishable from being
+            // refused. They have never signed in, so this reaches them by
+            // email — the reason a personal address is asked for at all.
+            if (issued.kind === "password") {
+              void notifier.send(notifications.registrationApproved(userId)).catch(() => {});
+            }
+            return send(200, issued);
           }
           if (url.pathname === "/api/admin/invite" && req.method === "POST") {
             const b = await body(req);
@@ -590,25 +612,38 @@ server.listen(PORT, HOST, () => {
   console.log(`Ekpothe — pilot server`);
   console.log(`  ${scheme}://${HOST === "0.0.0.0" ? "0.0.0.0" : "localhost"}:${PORT}`);
   console.log(`  database:   ${DB_PATH}`);
+  /*
+    Reported per channel, not as one verdict.
+
+    An earlier version printed "push + email" whenever push keys were present,
+    which is how an administrator ends up believing approval mail goes out when
+    no mailer is configured at all. The colleague waiting to be let in is the
+    one who pays for that.
+  */
   console.log(
-    notifier.canPush
-      ? "  notify:     push + email"
-      : mailer.enabled
-        ? "  notify:     email only — set VAPID keys to reach phones directly"
-        : "  notify:     NONE — colleagues must open the app to see requests",
+    `  push:       ${notifier.canPush ? "on" : "OFF — set VAPID keys to reach phones"}`,
   );
-  console.log(`  register:   self-registration on, ${BLOCKED_DOMAINS.map((d) => `@${d}`).join(", ")} blocked`);
-  if (ACCESS_MODE === "invite") {
-    console.log("  access:     invite-only — no email addresses asked for or stored");
-    console.log("  joining:    you mint a code in Admin and hand it to a colleague");
+  if (!mailer.enabled) {
+    console.log("  email:      OFF — set SMTP_* or nobody is told they were approved");
+    if (!notifier.canPush) {
+      console.log("  WARNING: no way to reach anybody who is not looking at the app.");
+    }
   } else {
-    console.log(`  access:     ${ALLOWED_DOMAINS.map((d) => `@${d}`).join(", ")}`);
-    console.log(
-      mailer.enabled
-        ? `  joining:    automatic — codes emailed to ${AUTO_APPROVE_DOMAINS.map((d) => `@${d}`).join(", ")}`
-        : "  joining:    manual — no SMTP configured, so codes are relayed by the admin",
-    );
+    // Checked rather than assumed, and printed when the answer arrives. Boot is
+    // not held up for a relay that may be slow, but the truth still lands in
+    // the same place the administrator is already looking.
+    console.log("  email:      settings present — checking the relay…");
+    void mailer.verify().then((v) => {
+      console.log(
+        v.ok
+          ? "  email:      relay reachable and accepted the login"
+          : `  email:      BROKEN — ${v.error}\n              Approval mail will not arrive. See docs/EMAIL_SETUP.md`,
+      );
+    });
   }
+  console.log(
+    `  joining:    colleagues register themselves, ${BLOCKED_DOMAINS.map((d) => `@${d}`).join(", ")} refused; you approve`,
+  );
   if (OWN_TLS) {
     console.log(`  TLS:        this process, from TLS_CERT and TLS_KEY`);
   } else if (TRUST_PROXY) {

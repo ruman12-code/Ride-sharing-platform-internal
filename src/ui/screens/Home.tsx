@@ -1,6 +1,7 @@
 import { type Lang, num, t, taka } from "../i18n.js";
 import { Strapline } from "../components/Strapline.jsx";
 import { Unofficial } from "../components/Unofficial.jsx";
+import { ContactCard } from "../components/ContactCard.jsx";
 import { NotifyToggle } from "../components/NotifyToggle.jsx";
 import { SeatRequests } from "../components/SeatRequests.jsx";
 import { timeOf, zoneName } from "../components/common.jsx";
@@ -76,11 +77,24 @@ export const Home = ({
 
       <div className="card" style={{ background: "var(--green-wash)", borderColor: "#bcd9cc" }}>
         <div style={{ color: "var(--green-dark)", fontSize: 14 }}>
-          <strong>{num(app.corridorActivity, lang)}</strong> {t("liveActivity", lang)}
+          {app.corridorActivity === 0 ? (
+            t("noRidesYet", lang)
+          ) : (
+            <>
+              <strong>{num(app.corridorActivity, lang)}</strong>{" "}
+              {t(app.corridorActivity === 1 ? "liveActivityOne" : "liveActivity", lang)}
+            </>
+          )}
         </div>
       </div>
 
       <NotifyToggle lang={lang} />
+
+      {/*
+        Sits beside notifications because they are the same promise: a colleague
+        who cannot be reached is a colleague left standing on a corner.
+      */}
+      <ContactCard app={app} lang={lang} />
 
       <p className="section-title">{t("about", lang)}</p>
       <div className="card">

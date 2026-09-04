@@ -212,7 +212,9 @@ export const useApp = () => {
    * it is not, this is the standalone demo build and the seeded rides stand in.
    */
   const [live, setLive] = useState(false);
-  const [me, setMe] = useState<{ userId: string; displayName: string } | undefined>();
+  const [me, setMe] = useState<
+    { userId: string; displayName: string; role: string; hasContact: boolean } | undefined
+  >();
   /**
    * Real colleagues, from the server.
    *
@@ -247,7 +249,16 @@ export const useApp = () => {
   const reload = useCallback(async () => {
     const r = await api.me();
     if (r.ok && r.value) {
-      setMe({ userId: r.value.userId, displayName: r.value.displayName });
+      // The role comes with it and is carried through, so the interface can
+      // stop offering the admin screen to colleagues who are not admins. The
+      // server already refuses them; a tab that leads to a refusal is still a
+      // tab that should not be there.
+      setMe({
+        userId: r.value.userId,
+        displayName: r.value.displayName,
+        role: r.value.role,
+        hasContact: r.value.hasContact,
+      });
       await refresh();
     }
   }, [refresh]);
@@ -256,8 +267,38 @@ export const useApp = () => {
     void reload();
   }, [reload]);
 
-  /** Who "I" am: the signed-in colleague, or the demo persona offline. */
-  const identity = me ?? { userId: ME.id, displayName: ME.displayName };
+  /**
+   * Who "I" am: the signed-in colleague, or the demo persona offline.
+   *
+   * The offline persona is an admin because the demo build has no server and
+   * no real roles — whoever opens it is looking at a demonstration of the whole
+   * thing. Against a live server the role is whatever the server says.
+   */
+  const identity = me ?? { userId: ME.id, displayName: ME.displayName, role: "admin", hasContact: false };
+  const isAdmin = identity.role === "admin";
+
+  /**
+   * How the two of them actually arrange the pickup.
+   *
+   * No phone number is stored on anyone's behalf and there is no directory to
+   * browse. A colleague puts one detail on file for themselves, and it reaches
+   * exactly one other person, once the driver has accepted them — which is the
+   * moment they need it and not before. Every release is recorded, so "who has
+   * my number?" is a question with an answer.
+   */
+  const setContact = useCallback(
+    async (kind: string, value: string) => {
+      const r = await api.setContact(kind, value);
+      if (r.ok) await reload();
+      return r.ok;
+    },
+    [reload],
+  );
+
+  const revealContact = useCallback(
+    async (bookingId: string) => (await api.revealContact(bookingId)).value,
+    [],
+  );
   const [alerts, setAlerts] = useState<readonly SearchQuery[]>([]);
   const [ledger, setLedger] = useState<readonly CreditEntry[]>([]);
   const [feedback, setFeedback] = useState<readonly Feedback[]>([]);
@@ -498,9 +539,20 @@ export const useApp = () => {
     [rides, identity.userId],
   );
 
-  /** Visible liquidity. An empty-looking marketplace is abandoned immediately. */
+  /**
+   * How many rides are actually on offer.
+   *
+   * This used to add nine to the real figure, on the theory that an empty
+   * marketplace is abandoned on sight. It is — but the fix cannot be to invent
+   * nine colleagues. The first person to search would find one ride under a
+   * heading claiming ten, and the number they can check is the number that
+   * decides whether they believe anything else here.
+   *
+   * The empty case is handled honestly on the home screen instead: it says
+   * nobody has posted and asks them to be the first.
+   */
   const corridorActivity = useMemo(
-    () => rides.filter((r) => r.status === "published").length + 9,
+    () => rides.filter((r) => r.status === "published").length,
     [rides],
   );
 
@@ -517,7 +569,7 @@ export const useApp = () => {
     // Against a live server the booking goes to the server, where the seat
     // race and every other invariant is settled authoritatively.
     book: live ? bookRemote : book,
-    live, identity, refresh, reload, people,
+    live, identity, isAdmin, refresh, reload, people, setContact, revealContact,
     today: TODAY, dateOf,
   };
 };

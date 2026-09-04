@@ -212,6 +212,40 @@ export const notifications = {
     path: "/",
   }),
 
+  /**
+   * A colleague has registered and is waiting.
+   *
+   * Sent to the administrator, because a queue nobody is told about is a queue
+   * nobody empties — and a colleague who registers on Sunday and hears nothing
+   * by Monday has already decided the app does not work.
+   */
+  registrationReceived: (
+    adminId: string,
+    pendingUserId: string,
+    who: string,
+  ): OutgoingNotification => ({
+    id: `registration:${pendingUserId}`,
+    userId: adminId,
+    kind: "registration_received",
+    title: `${who} wants to join Ekpothe`,
+    body: "Open Ekpothe → Admin to approve or leave them waiting.",
+    path: "/",
+  }),
+
+  /**
+   * Approved. Sent by email in practice: they have never signed in, so there is
+   * no push subscription to buzz yet. Their personal address is the only way to
+   * reach them, and it is the reason one is asked for.
+   */
+  registrationApproved: (userId: string): OutgoingNotification => ({
+    id: `approved:${userId}`,
+    userId,
+    kind: "registration_approved",
+    title: "You're in — Ekpothe is open to you",
+    body: "Sign in with the email and password you chose.",
+    path: "/",
+  }),
+
   newRideOnYourRoute: (
     riderId: string,
     rideId: string,

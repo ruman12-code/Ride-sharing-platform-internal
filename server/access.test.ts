@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Db } from "./db.js";
 import {
   Access,
+  type ApprovalResult,
   CODE_VALID_DAYS,
   NOT_IN_ORGANISATION,
   MAX_REQUESTS_PER_HOUR,
@@ -12,6 +13,20 @@ import {
   generateCode,
   parseAllowedDomains,
 } from "./access.js";
+
+/**
+ * Narrow an approval to the code it minted.
+ *
+ * Approving somebody who already has a password issues no code, so the type is
+ * a union. These tests all approve invited colleagues, and saying so out loud
+ * means a future change that stops minting a code fails here rather than
+ * silently asserting nothing.
+ */
+const codeOf = (r: ApprovalResult | undefined): { code: string } => {
+  if (r?.kind !== "code") throw new Error(`expected a minted code, got ${JSON.stringify(r)}`);
+  return { code: r.code };
+};
+
 
 /**
  * The security boundary of the pilot.
@@ -117,14 +132,14 @@ describe("approving and redeeming", () => {
 
   it("issues a readable code that admits the colleague once", () => {
     const id = ask();
-    const issued = access.approve(id, "admin")!;
+    const issued = codeOf(access.approve(id, "admin"));
     expect(issued.code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/);
     expect(access.redeem("nusrat@example.org", issued.code)).toBe(id);
   });
 
   it("consumes the code, so a forwarded code is useless", () => {
     const id = ask();
-    const { code } = access.approve(id, "admin")!;
+    const { code } = codeOf(access.approve(id, "admin"));
     expect(access.redeem("nusrat@example.org", code)).toBe(id);
     expect(access.redeem("nusrat@example.org", code)).toBeUndefined();
   });
@@ -132,7 +147,7 @@ describe("approving and redeeming", () => {
   it("binds the code to one email — it does not work for anybody else", () => {
     const id = ask();
     const other = ask("tanvir@example.org");
-    const { code } = access.approve(id, "admin")!;
+    const { code } = codeOf(access.approve(id, "admin"));
     access.approve(other, "admin");
     expect(access.redeem("tanvir@example.org", code)).toBeUndefined();
     expect(access.redeem("nusrat@example.org", code)).toBe(id);
@@ -140,7 +155,7 @@ describe("approving and redeeming", () => {
 
   it("is case-insensitive on the code, because people retype what they were told", () => {
     const id = ask();
-    const { code } = access.approve(id, "admin")!;
+    const { code } = codeOf(access.approve(id, "admin"));
     expect(access.redeem("NUSRAT@example.org", code.toLowerCase())).toBe(id);
   });
 
@@ -152,22 +167,22 @@ describe("approving and redeeming", () => {
 
   it("refuses anyone still pending, however the code was obtained", () => {
     const id = ask();
-    const { code } = access.approve(id, "admin")!;
+    const { code } = codeOf(access.approve(id, "admin"));
     db.run("UPDATE users SET status = 'pending' WHERE id = ?", id);
     expect(access.redeem("nusrat@example.org", code)).toBeUndefined();
   });
 
   it("invalidates an earlier unused code when re-approving", () => {
     const id = ask();
-    const first = access.approve(id, "admin")!;
-    const second = access.approve(id, "admin")!;
+    const first = codeOf(access.approve(id, "admin"));
+    const second = codeOf(access.approve(id, "admin"));
     expect(access.redeem("nusrat@example.org", first.code)).toBeUndefined();
     expect(access.redeem("nusrat@example.org", second.code)).toBe(id);
   });
 
   it("stores only a hash — a copy of the database hands nobody a working code", () => {
     const id = ask();
-    const { code } = access.approve(id, "admin")!;
+    const { code } = codeOf(access.approve(id, "admin"));
     const rows = db.all<{ codeHash: string }>("SELECT codeHash FROM invite_codes");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.codeHash).not.toContain(code);
@@ -176,7 +191,7 @@ describe("approving and redeeming", () => {
 
   it("expires a code after a week", () => {
     const id = ask();
-    const { code } = access.approve(id, "admin")!;
+    const { code } = codeOf(access.approve(id, "admin"));
     db.run(
       "UPDATE invite_codes SET expiresAt = ? WHERE userId = ?",
       new Date(Date.now() - 1000).toISOString(),
@@ -188,7 +203,7 @@ describe("approving and redeeming", () => {
 
   it("writes an audit row for the approval and the redemption", () => {
     const id = ask();
-    const { code } = access.approve(id, "admin")!;
+    const { code } = codeOf(access.approve(id, "admin"));
     access.redeem("nusrat@example.org", code);
     const actions = db.all<{ action: string }>("SELECT action FROM audit_log").map((a) => a.action);
     expect(actions).toContain("approve");
@@ -200,7 +215,7 @@ describe("suspending", () => {
   it("ends access immediately, not at the next sign-in", () => {
     access.request("nusrat@example.org", "Nusrat", "1.2.3.4");
     const id = access.pending()[0]!.id;
-    const { code } = access.approve(id, "admin")!;
+    const { code } = codeOf(access.approve(id, "admin"));
     access.redeem("nusrat@example.org", code);
     db.run(
       "INSERT INTO sessions (token, userId, createdAt, expiresAt) VALUES (?, ?, ?, ?)",

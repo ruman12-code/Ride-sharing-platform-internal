@@ -99,7 +99,7 @@ export const AccessGate = ({
 
       <div className="card raised">
         <label className="label" htmlFor="email">
-          {mode === "register" ? t("personalEmail", lang) : t("workEmail", lang)}
+          {mode === "register" ? t("personalEmail", lang) : t("signInEmail", lang)}
         </label>
         <input
           id="email"
@@ -113,8 +113,19 @@ export const AccessGate = ({
         {mode === "register" && (
           <p className="hint">
             {t("personalEmailHint", lang)}
+            {/*
+              Said as a sentence rather than a bare domain. The domain used to
+              be appended on its own, which read as a fragment nobody could
+              act on — it looked like an example to copy rather than the one
+              thing that will be refused.
+            */}
             {blocked.length > 0 && (
-              <> <strong>{blocked.map((d) => `@${d}`).join(", ")}</strong> </>
+              <>
+                {" "}
+                {t("blockedDomainsHint", lang).split("%s")[0]}
+                <strong>{blocked.map((d) => `@${d}`).join(", ")}</strong>
+                {t("blockedDomainsHint", lang).split("%s")[1]}
+              </>
             )}
           </p>
         )}

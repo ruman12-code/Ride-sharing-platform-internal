@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildWorkbook, exportFilename } from "../../export/excel.js";
 import { writeWorkbook } from "../../export/xlsx-writer.js";
 import { FUEL_PRICES } from "../../adapters/local-json/seed/fuel.js";
@@ -17,8 +17,25 @@ import { COLLEAGUES, ME, type App } from "../store.js";
  * tool could not establish that a single ride ever happened, and one provable
  * trip is a categorical improvement over an unmeasurable zero.
  */
+/**
+ * A colleague who has registered and is waiting.
+ *
+ * The optional fields are exactly what the registration form asks for and
+ * nothing more: the administrator approves on recognition, not on a dossier.
+ */
+interface PendingRegistration {
+  readonly id: string;
+  readonly displayName: string;
+  readonly officialName: string | null;
+  readonly department: string | null;
+  readonly createdAt: string;
+}
+
 export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
   const today = "2026-09-04";
+  const [pending, setPending] = useState<PendingRegistration[]>([]);
+  const [approving, setApproving] = useState<string | undefined>();
+  const [justApproved, setJustApproved] = useState<string[]>([]);
   const [inviteName, setInviteName] = useState("");
   const [issued, setIssued] = useState<{ name: string; code: string } | undefined>();
   const [inviting, setInviting] = useState(false);
@@ -26,6 +43,21 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
   const [cap, setCap] = useState(DEFAULT_DAILY_RIDE_CAP);
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<string | undefined>();
+
+  const loadPending = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/pending");
+      if (!res.ok) return; // demo build with no server, or not an admin
+      const body = (await res.json()) as { pending?: PendingRegistration[] };
+      setPending(body.pending ?? []);
+    } catch {
+      // No server behind this build. The queue is simply empty.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPending();
+  }, [loadPending]);
 
   const octane = prices.find((p) => p.id === "fp-octane-2026-06")!;
   const stale = isStale(octane, today);
@@ -71,11 +103,73 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
       <h2 className="h2">{t("admin", lang)}</h2>
 
       {/*
-        Minting a code is the first thing an administrator does and the thing
-        they do most often during a pilot, so it sits at the top rather than
-        buried under the metrics.
+        The approval queue leads.
+
+        Colleagues now register themselves, so this is the one screen that
+        stands between somebody signing up and being able to use the app at
+        all. Everything below it — codes, fuel rate, metrics, export — matters
+        weekly at most; this matters the same day, and an administrator who has
+        to scroll to find it will leave people waiting.
       */}
-      <p className="section-title" style={{ marginTop: 0 }}>{t("inviteColleague", lang)}</p>
+      <p className="section-title" style={{ marginTop: 0 }}>{t("pendingApprovals", lang)}</p>
+      {pending.length === 0 ? (
+        <div className="card">
+          <p className="hint" style={{ margin: 0 }}>{t("nobodyWaiting", lang)}</p>
+        </div>
+      ) : (
+        <>
+          <div className="notice warn" style={{ marginBottom: 12 }}>{t("approveWarning", lang)}</div>
+          {pending.map((p) => (
+            <div className="card raised" key={p.id} style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 650, fontSize: 17 }}>{p.displayName}</div>
+              {p.officialName ? (
+                <div className="hint" style={{ marginTop: 2 }}>
+                  {t("registeredAs", lang)}: {p.officialName}
+                  {p.department ? ` · ${p.department}` : ""}
+                </div>
+              ) : (
+                <div className="hint" style={{ marginTop: 2 }}>{t("noOfficialName", lang)}</div>
+              )}
+              <button
+                className="btn primary block"
+                style={{ marginTop: 12 }}
+                disabled={approving === p.id}
+                onClick={() => {
+                  setApproving(p.id);
+                  void fetch("/api/admin/approve", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ userId: p.id }),
+                  })
+                    .then((r) => {
+                      if (!r.ok) return;
+                      setJustApproved((n) => [...n, p.displayName]);
+                      // Refetched rather than spliced out locally, so the list
+                      // reflects the server even if another admin device
+                      // approved somebody at the same moment.
+                      void loadPending();
+                    })
+                    .finally(() => setApproving(undefined));
+                }}
+              >
+                {approving === p.id ? t("approving", lang) : `${t("approve", lang)} — ${p.displayName}`}
+              </button>
+            </div>
+          ))}
+        </>
+      )}
+      {justApproved.length > 0 && (
+        <div className="notice good" style={{ marginBottom: 4 }}>
+          {t("approved", lang)}: {justApproved.join(", ")}
+        </div>
+      )}
+
+      {/*
+        Minting a code is still here for the colleague who cannot or will not
+        register — no smartphone email, a shared device — but it is no longer
+        the main route in, so it no longer leads.
+      */}
+      <p className="section-title">{t("inviteColleague", lang)}</p>
       <div className="card raised">
         <label className="label" htmlFor="invite-name">{t("theirName", lang)}</label>
         <input

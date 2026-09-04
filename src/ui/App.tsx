@@ -102,19 +102,27 @@ export const App = () => {
           <FindFlow app={app} lang={lang} onOfferInstead={() => setScreen("offer")} />
         )}
         {screen === "mine" && <MyRides app={app} lang={lang} />}
-        {screen === "admin" && <Admin app={app} lang={lang} />}
+        {screen === "admin" && app.isAdmin && <Admin app={app} lang={lang} />}
         <p className="credit">
           <strong>{t("builtBy", lang)}</strong>
         </p>
       </main>
 
       <nav className="tabbar" aria-label="Main">
+        {/*
+          The admin tab is only for admins.
+
+          It used to be shown to everybody. The server refused the requests
+          behind it, so nothing leaked — but every colleague was offered a
+          settings-looking tab that answered "Not an administrator", which
+          reads as a broken app rather than a boundary.
+        */}
         {([
           ["home", "home", "⌂"],
           ["offer", "offerARide", "🚗"],
           ["find", "findARide", "🔎"],
           ["mine", "myRides", "☰"],
-          ["admin", "admin", "⚙"],
+          ...(app.isAdmin ? [["admin", "admin", "⚙"] as const] : []),
         ] as const).map(([id, key, glyph]) => (
           <button
             key={id}

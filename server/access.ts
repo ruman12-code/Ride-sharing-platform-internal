@@ -124,6 +124,19 @@ const hashIp = (ip: string, pepper: string): string =>
  */
 export type AccessMode = "invite" | "domain";
 
+/**
+ * What approving somebody actually produced.
+ *
+ * `code` — the colleague has no password yet (they were invited), so a
+ *          single-use code is minted for them to redeem.
+ * `password` — they registered themselves and already chose a password.
+ *          Approval is the whole action; issuing a code as well would hand
+ *          them a second credential and point them at the wrong door.
+ */
+export type ApprovalResult =
+  | { readonly kind: "code"; readonly code: string }
+  | { readonly kind: "password" };
+
 export interface AccessOptions {
   readonly mode: AccessMode;
   /** Domains that may request access at all. */
@@ -190,7 +203,10 @@ export class Access {
       `invite:${userId}`,
       new Date().toISOString(),
     );
-    const issued = this.approve(userId, adminId)!;
+    const issued = this.approve(userId, adminId);
+    // The row was just inserted with no password, so approve always mints a
+    // code here. Asserting it rather than assuming keeps the invariant local.
+    if (issued?.kind !== "code") throw new Error("invite: expected a code");
     return { code: issued.code, userId };
   }
 
@@ -274,7 +290,7 @@ export class Access {
     if (existing) {
       if (this.autoApproves(normalised)) {
         const issued = this.approve(existing.id, "system");
-        return { ...this.emailedMessage(), userId: existing.id, ...(issued ? { code: issued.code } : {}) };
+        return { ...this.emailedMessage(), userId: existing.id, ...(issued?.kind === "code" ? { code: issued.code } : {}) };
       }
       return same;
     }
@@ -291,7 +307,7 @@ export class Access {
 
     if (this.autoApproves(normalised)) {
       const issued = this.approve(userId, "system");
-      return { ...this.emailedMessage(), userId, ...(issued ? { code: issued.code } : {}) };
+      return { ...this.emailedMessage(), userId, ...(issued?.kind === "code" ? { code: issued.code } : {}) };
     }
     return { ...same, userId };
   }
@@ -342,9 +358,27 @@ export class Access {
    * pass on. Only its hash is stored, so it cannot be recovered later and a
    * copy of the database does not hand anybody a working code.
    */
-  approve(userId: string, adminId: string): { code: string } | undefined {
-    const user = this.db.get<{ id: string }>("SELECT id FROM users WHERE id = ?", userId);
+  approve(userId: string, adminId: string): ApprovalResult | undefined {
+    const user = this.db.get<{ id: string; passwordHash: string | null }>(
+      "SELECT id, passwordHash FROM users WHERE id = ?",
+      userId,
+    );
     if (!user) return undefined;
+
+    const now0 = new Date();
+    // A colleague who registered themselves already chose a password. Minting
+    // a code for them would hand out a second credential nobody asked for and
+    // tell them to sign in with the wrong one. Approval is the whole action.
+    if (user.passwordHash) {
+      this.db.run(
+        "UPDATE users SET status = 'approved', approvedBy = ?, approvedAt = ? WHERE id = ?",
+        adminId,
+        now0.toISOString(),
+        userId,
+      );
+      this.db.audit(adminId, "user", userId, "approve");
+      return { kind: "password" };
+    }
 
     const code = generateCode();
     const salt = randomBytes(16).toString("hex");
@@ -370,7 +404,7 @@ export class Access {
       new Date(now.getTime() + CODE_VALID_DAYS * 24 * 3_600_000).toISOString(),
     );
     this.db.audit(adminId, "user", userId, "approve");
-    return { code };
+    return { kind: "code", code };
   }
 
   suspend(userId: string, adminId: string): void {

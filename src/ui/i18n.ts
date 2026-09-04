@@ -24,10 +24,44 @@ export const STRINGS = {
   findARideSub: { en: "Going the same way as someone.", bn: "কারও সঙ্গে একই পথে।" },
   today: { en: "Today", bn: "আজ" },
   nothingToday: { en: "No trip booked today.", bn: "আজ কোনো ট্রিপ নেই।" },
+
+  // Contact exchange — how the pickup actually gets arranged.
+  howToReachYou: { en: "How can a colleague reach you?", bn: "সহকর্মী আপনাকে কীভাবে পাবেন?" },
+  contactHint: {
+    en: "A phone or WhatsApp number. Nobody can browse this. It is shown to one colleague, once a seat is confirmed, and every time it is shown is recorded.",
+    bn: "ফোন বা হোয়াটসঅ্যাপ নম্বর। কেউ এটি খুঁজে দেখতে পারবে না। আসন নিশ্চিত হলে শুধু একজন সহকর্মীকে দেখানো হয়, এবং প্রতিবার দেখানোর রেকর্ড থাকে।",
+  },
+  saveContact: { en: "Save", bn: "সংরক্ষণ" },
+  contactSaved: { en: "Saved.", bn: "সংরক্ষিত।" },
+  contactMissing: {
+    en: "Add a number so the colleague you ride with can reach you.",
+    bn: "যাঁর সঙ্গে যাবেন তিনি যেন আপনাকে পান, সেজন্য একটি নম্বর দিন।",
+  },
+  getTheirNumber: { en: "Get their number", bn: "তাঁর নম্বর নিন" },
+  theirNumberHidden: {
+    en: "They haven't added a number yet. Ekpothe will not invent one.",
+    bn: "তিনি এখনো নম্বর দেননি। একপথে কোনো নম্বর বানিয়ে দেবে না।",
+  },
+  markDone: { en: "Mark this trip done", bn: "যাত্রা সম্পন্ন বলে চিহ্নিত করুন" },
   pendingActions: { en: "Needs you", bn: "আপনার সাড়া দরকার" },
   liveActivity: {
-    en: "colleagues are commuting your corridor this week",
-    bn: "জন সহকর্মী এই সপ্তাহে আপনার রুটে যাতায়াত করছেন",
+    en: "rides on offer right now",
+    bn: "টি যাত্রা এখন খোলা আছে",
+  },
+  liveActivityOne: {
+    en: "ride on offer right now",
+    bn: "টি যাত্রা এখন খোলা আছে",
+  },
+  /*
+    The honest empty state.
+
+    An empty marketplace really does get abandoned on sight, which is why the
+    count used to be padded. The answer is to ask for the thing that fixes it
+    rather than to pretend it is already fixed.
+  */
+  noRidesYet: {
+    en: "No rides posted yet. Post yours — a colleague searching tomorrow will find it.",
+    bn: "এখনো কোনো যাত্রা নেই। আপনারটি দিন — আগামীকাল কেউ খুঁজলে সেটি পাবেন।",
   },
 
   // Offer flow
@@ -116,9 +150,21 @@ export const STRINGS = {
   alreadyHave: { en: "I already have an account", bn: "আমার অ্যাকাউন্ট আছে" },
   needAccount: { en: "I need an account", bn: "আমার অ্যাকাউন্ট দরকার" },
   personalEmail: { en: "Personal email", bn: "ব্যক্তিগত ইমেইল" },
+  /*
+    Signing in says only "Email".
+
+    It used to say "Work email", left over from when a work address was how you
+    got in. On a form that now refuses work addresses outright, that label was
+    telling people to type the one thing the next screen would reject.
+  */
+  signInEmail: { en: "Email", bn: "ইমেইল" },
   personalEmailHint: {
     en: "Your own address, not your work one. That's deliberate — it keeps your employer's data out of this entirely.",
     bn: "আপনার নিজের ঠিকানা, অফিসের নয়। এটি ইচ্ছাকৃত — এতে আপনার প্রতিষ্ঠানের তথ্য এর বাইরে থাকে।",
+  },
+  blockedDomainsHint: {
+    en: "Addresses at %s are not accepted.",
+    bn: "%s ঠিকানা গ্রহণ করা হয় না।",
   },
   password: { en: "Password", bn: "পাসওয়ার্ড" },
   passwordHint: { en: "At least 8 characters.", bn: "কমপক্ষে ৮টি অক্ষর।" },
@@ -171,6 +217,22 @@ export const STRINGS = {
   noEmailNeeded: {
     en: "No email address is asked for or stored.",
     bn: "কোনো ইমেইল ঠিকানা চাওয়া বা সংরক্ষণ করা হয় না।",
+  },
+  waitingToJoin: { en: "Waiting to join", bn: "যোগ দিতে অপেক্ষমাণ" },
+  nobodyWaiting: {
+    en: "Nobody is waiting. Colleagues who register appear here.",
+    bn: "কেউ অপেক্ষায় নেই। যাঁরা নিবন্ধন করবেন তাঁরা এখানে দেখা যাবেন।",
+  },
+  approving: { en: "Approving…", bn: "অনুমোদন হচ্ছে…" },
+  approved: { en: "Approved — they can sign in now", bn: "অনুমোদিত — তাঁরা এখন সাইন ইন করতে পারবেন" },
+  registeredAs: { en: "Registered as", bn: "নিবন্ধিত নাম" },
+  noOfficialName: {
+    en: "No official name given — approve only if you recognise them.",
+    bn: "সরকারি নাম দেওয়া হয়নি — চিনতে পারলেই অনুমোদন করুন।",
+  },
+  approveWarning: {
+    en: "Approving lets this person see every published ride and the names on them. Approve only colleagues you recognise.",
+    bn: "অনুমোদন করলে এই ব্যক্তি সব প্রকাশিত যাত্রা ও সেখানকার নাম দেখতে পাবেন। শুধু পরিচিত সহকর্মীকেই অনুমোদন করুন।",
   },
   inviteColleague: { en: "Invite a colleague", bn: "সহকর্মীকে আমন্ত্রণ" },
   theirName: { en: "Their name", bn: "তাঁর নাম" },
@@ -225,7 +287,13 @@ export const STRINGS = {
   seatsNeeded: { en: "Seats", bn: "সিট" },
   seatNeeded: { en: "Seat", bn: "সিট" },
   searchAction: { en: "Search", bn: "খুঁজুন" },
+  /*
+    Bangla has no plural agreement here, so one string covers both. English
+    does, and "1 colleagues going your way" was the first thing a colleague
+    read on the screen that decides whether they trust the app.
+  */
   resultsCount: { en: "colleagues going your way", bn: "জন সহকর্মী আপনার পথে যাচ্ছেন" },
+  resultsCountOne: { en: "colleague going your way", bn: "জন সহকর্মী আপনার পথে যাচ্ছেন" },
   requestSeat: { en: "Request seat", bn: "সিট চান" },
   alertMe: { en: "Alert me", bn: "জানাবেন" },
   seatsLeft: { en: "seats left", bn: "সিট বাকি" },

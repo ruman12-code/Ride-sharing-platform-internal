@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "build:routes": "tsx tools/build-route-table.ts",
     "build:server": "tsc -p tsconfig.server.json",
-    "start": "npm run build && npm run build:server && node dist-server/server/index.js"
+    "start": "npm run build && npm run build:server && node dist-server/server/index.js",
+    "setup": "node tools/setup-env.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

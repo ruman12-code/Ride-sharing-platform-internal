@@ -48,9 +48,46 @@ interface SavedRoute {
   readonly time: string;
 }
 
-const SAVED: readonly SavedRoute[] = [
-  { origin: "uttara", destination: "gulshan-2", time: "07:45" },
-];
+/**
+ * The routes this driver has actually published, most recent first.
+ *
+ * This used to be a hardcoded pair, which meant a colleague opening the app for
+ * the first time was shown "Uttara → Gulshan-2" under the heading "Your saved
+ * routes" — a journey they had never made, presented as their own history. One
+ * tap and they would have published somebody else's commute.
+ *
+ * Deduplicated on origin+destination so a daily commute is one entry rather
+ * than thirty, and capped: this is a shortcut, and a list long enough to
+ * scroll is slower than the picker it replaces.
+ */
+const MAX_SAVED = 3;
+
+export const savedRoutesOf = (myRides: readonly Ride[]): readonly SavedRoute[] => {
+  const seen = new Set<string>();
+  const out: SavedRoute[] = [];
+  // Newest first, so the route someone drives now outranks one they drove once
+  // in March.
+  for (const r of [...myRides].sort((a, b) => b.departureAt.localeCompare(a.departureAt))) {
+    const origin = r.zoneSequence[0];
+    const destination = r.zoneSequence[r.zoneSequence.length - 1];
+    // A ride with fewer than two stops is not a route anybody can repeat.
+    if (!origin || !destination || origin === destination) continue;
+
+    const key = `${origin}>${destination}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      origin,
+      destination,
+      // The clock time they used. departureAt always carries an explicit
+      // +06:00 offset, so these characters are the Dhaka wall-clock time the
+      // form wants back — no timezone conversion, and none wanted.
+      time: r.departureAt.slice(11, 16),
+    });
+    if (out.length === MAX_SAVED) break;
+  }
+  return out;
+};
 
 export const OfferFlow = ({
   app, lang, onDone, onCancel,
@@ -60,6 +97,7 @@ export const OfferFlow = ({
   onDone: () => void;
   onCancel: () => void;
 }) => {
+  const saved = useMemo(() => savedRoutesOf(app.myRides), [app.myRides]);
   const [step, setStep] = useState(0);
   const [origin, setOrigin] = useState<string | undefined>();
   const [destination, setDestination] = useState<string | undefined>();
@@ -248,10 +286,10 @@ export const OfferFlow = ({
 
       {step === 0 && (
         <>
-          {SAVED.length > 0 && (
+          {saved.length > 0 && (
             <>
               <p className="section-title">{t("savedRoutes", lang)}</p>
-              {SAVED.map((r) => (
+              {saved.map((r) => (
                 <button key={r.origin + r.destination} className="bigcard" onClick={() => applySaved(r)}>
                   <span className="icon" aria-hidden="true">↻</span>
                   <span>
