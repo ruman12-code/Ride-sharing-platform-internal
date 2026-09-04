@@ -8,6 +8,7 @@ import { FindFlow } from "./screens/FindFlow.jsx";
 import { MyRides } from "./screens/MyRides.jsx";
 import { Admin } from "./screens/Admin.jsx";
 import { AccessGate } from "./screens/AccessGate.jsx";
+import { Wordmark } from "./components/Wordmark.jsx";
 
 type Screen = "home" | "offer" | "find" | "mine" | "admin";
 
@@ -59,17 +60,22 @@ export const App = () => {
     return (
       <div className="app" lang={lang}>
         <header className="topbar">
-          <h1 className="wordmark">
-            {t("appName", lang)}
-            <span className="sub">{t("appNameSub", lang)}</span>
-          </h1>
+          <h1 className="wordmark"><Wordmark lang={lang} /></h1>
           <span className="spacer" />
           <div className="langtoggle" role="group" aria-label="Language">
             <button aria-pressed={lang === "en"} onClick={() => setLang("en")}>EN</button>
             <button aria-pressed={lang === "bn"} onClick={() => setLang("bn")}>বাংলা</button>
           </div>
         </header>
-        <AccessGate lang={lang} onSignedIn={() => setSession("in")} />
+        <AccessGate
+          lang={lang}
+          onSignedIn={() => {
+            setSession("in");
+            // The store was created before the gate was passed, so its first
+            // load saw a 401. Re-run it now that there is a session.
+            void app.reload();
+          }}
+        />
       </div>
     );
   }
@@ -77,10 +83,7 @@ export const App = () => {
   return (
     <div className="app" lang={lang}>
       <header className="topbar">
-        <h1 className="wordmark">
-          {t("appName", lang)}
-          <span className="sub">{t("appNameSub", lang)}</span>
-        </h1>
+        <h1 className="wordmark"><Wordmark lang={lang} /></h1>
         <span className="spacer" />
         <div className="langtoggle" role="group" aria-label="Language">
           <button aria-pressed={lang === "en"} onClick={() => setLang("en")}>EN</button>

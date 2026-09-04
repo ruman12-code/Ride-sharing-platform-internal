@@ -11,10 +11,11 @@ import {
   recommendedContribution,
 } from "../../domain/pricing/contribution.js";
 import { RouteLine, type RouteStop } from "../components/RouteLine.jsx";
+import { Unofficial } from "../components/Unofficial.jsx";
 import { validatePublish } from "../../domain/policy/invariants.js";
 import { type Lang, num, t, taka } from "../i18n.js";
 import { Progress, Stepper, Toggle, ZonePicker, zoneName } from "../components/common.jsx";
-import { ACTIVE_FUEL_PRICE, ME, explain, shareFor, type App } from "../store.js";
+import { ACTIVE_FUEL_PRICE, ME, defaultRideDate, explain, shareFor, type App } from "../store.js";
 
 /**
  * The driver's four screens: Route, When, Seats & car, Cost share.
@@ -65,6 +66,9 @@ export const OfferFlow = ({
   const [via, setVia] = useState<readonly string[]>([]);
   const [viaTouched, setViaTouched] = useState(false);
   const [time, setTime] = useState("07:45");
+  // Defaults to tomorrow: a departure earlier today is unbookable, and the
+  // common case is arranging tomorrow morning.
+  const [date, setDate] = useState(defaultRideDate);
   const [repeat, setRepeat] = useState(true);
   const [days, setDays] = useState<readonly DayOfWeek[]>(WORKING_DAYS);
   const [seats, setSeats] = useState(2);
@@ -167,7 +171,7 @@ export const OfferFlow = ({
       );
       return;
     }
-    const departureAt = `2026-09-04T${time}:00+06:00`;
+    const departureAt = `${date}T${time}:00+06:00`;
     const check = validatePublish(
       { departureAt, costSharePerSeat: chosenShare, seatsTotal: seats },
       cap,
@@ -199,8 +203,18 @@ export const OfferFlow = ({
       status: "published",
       rowVersion: 1,
     };
-    app.publish(ride);
-    onDone();
+    // Report a refusal instead of navigating away as though it worked.
+    void Promise.resolve(app.publish(ride)).then((published) => {
+      if (published === false) {
+        setError(
+          lang === "en"
+            ? "That could not be published. Check the departure is in the future."
+            : "প্রকাশ করা গেল না। সময়টি ভবিষ্যতে আছে কিনা দেখুন।",
+        );
+        return;
+      }
+      onDone();
+    });
   };
 
   const canNext = [
@@ -224,6 +238,10 @@ export const OfferFlow = ({
           <p>{t("declaration", lang)}</p>
         </div>
       </div>
+
+      {/* Beside the disclaimer, because publishing a journey is the moment a
+          colleague is most entitled to know what they are publishing it into. */}
+      <Unofficial lang={lang} />
 
       <Progress step={step} total={4} lang={lang} />
       <h2 className="h2">{t(STEP_TITLES[step]!, lang)}</h2>
@@ -366,7 +384,18 @@ export const OfferFlow = ({
       {step === 1 && (
         <>
           <div className="card">
-            <label className="label" htmlFor="time">{t("when", lang)}</label>
+            <label className="label" htmlFor="date">{t("when", lang)}</label>
+            <input
+              id="date"
+              className="input"
+              type="date"
+              value={date}
+              min={new Date(Date.now() + 6 * 3600_000).toISOString().slice(0, 10)}
+              onChange={(e) => setDate(e.target.value)}
+            />
+            <label className="label" htmlFor="time" style={{ marginTop: 14 }}>
+              {t("departureTime", lang)}
+            </label>
             <input
               id="time"
               className="input"

@@ -19,6 +19,9 @@ import { COLLEAGUES, ME, type App } from "../store.js";
  */
 export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
   const today = "2026-09-04";
+  const [inviteName, setInviteName] = useState("");
+  const [issued, setIssued] = useState<{ name: string; code: string } | undefined>();
+  const [inviting, setInviting] = useState(false);
   const [prices, setPrices] = useState(FUEL_PRICES);
   const [cap, setCap] = useState(DEFAULT_DAILY_RIDE_CAP);
   const [exporting, setExporting] = useState(false);
@@ -66,6 +69,62 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
   return (
     <div>
       <h2 className="h2">{t("admin", lang)}</h2>
+
+      {/*
+        Minting a code is the first thing an administrator does and the thing
+        they do most often during a pilot, so it sits at the top rather than
+        buried under the metrics.
+      */}
+      <p className="section-title" style={{ marginTop: 0 }}>{t("inviteColleague", lang)}</p>
+      <div className="card raised">
+        <label className="label" htmlFor="invite-name">{t("theirName", lang)}</label>
+        <input
+          id="invite-name"
+          className="input"
+          value={inviteName}
+          onChange={(e) => setInviteName(e.target.value)}
+          placeholder={lang === "en" ? "e.g. Nusrat" : "যেমন নুসরাত"}
+        />
+        <button
+          className="btn primary block"
+          style={{ marginTop: 12 }}
+          disabled={inviteName.trim().length === 0 || inviting}
+          onClick={() => {
+            setInviting(true);
+            void fetch("/api/admin/invite", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ displayName: inviteName.trim() }),
+            })
+              .then((r) => r.json())
+              .then((b: { code?: string }) => {
+                if (b.code) setIssued({ name: inviteName.trim(), code: b.code });
+                setInviteName("");
+              })
+              .finally(() => setInviting(false));
+          }}
+        >
+          {inviting ? "…" : t("generateCode", lang)}
+        </button>
+
+        {issued && (
+          <div className="notice good" style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 13 }}>{t("codeIssued", lang)} — {issued.name}</div>
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 34,
+                fontWeight: 700,
+                letterSpacing: "0.22em",
+                margin: "8px 0 6px",
+              }}
+            >
+              {issued.code}
+            </div>
+            <div style={{ fontSize: 12 }}>{t("codeOnce", lang)}</div>
+          </div>
+        )}
+      </div>
 
       <p className="section-title">{t("metrics", lang)}</p>
       <div className="card">

@@ -3,7 +3,7 @@ import type { CounterfactualMode, SettlementMode } from "../../domain/entities/b
 import type { MatchResult } from "../../domain/matching/corridor.js";
 import { type Lang, num, t, taka } from "../i18n.js";
 import { Sheet, Stepper, ZonePicker, initials, timeOf, zoneName } from "../components/common.jsx";
-import { userById, type App } from "../store.js";
+import { defaultRideDate, userById, type App } from "../store.js";
 
 /**
  * The rider's flow: one search bar, result cards, a booking sheet.
@@ -49,6 +49,9 @@ export const FindFlow = ({
   const [origin, setOrigin] = useState<string | undefined>("uttara");
   const [destination, setDestination] = useState<string | undefined>("gulshan-2");
   const [time, setTime] = useState("07:45");
+  // Matches the offer flow's default, so a rider searching straight after a
+  // driver posts finds them rather than an empty list.
+  const [date, setDate] = useState(defaultRideDate);
   const [seats, setSeats] = useState(1);
   const [searched, setSearched] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -60,11 +63,11 @@ export const FindFlow = ({
     return app.search({
       originZoneId: origin,
       destinationZoneId: destination,
-      targetTime: `${app.today}T${time}:00+06:00`,
+      targetTime: `${date}T${time}:00+06:00`,
       windowMinutes: 30,
       seats,
     });
-  }, [app, searched, origin, destination, time, seats]);
+  }, [app, searched, origin, destination, date, time, seats]);
 
   const runSearch = () => {
     setSearched(true);
@@ -88,7 +91,10 @@ export const FindFlow = ({
               {origin ? zoneName(origin, lang) : "—"} → {destination ? zoneName(destination, lang) : "—"}
             </strong>
             <span className="d" style={{ display: "block", fontSize: 13, color: "var(--ink-soft)" }}>
-              {num(time, lang)} · {num(seats, lang)}{" "}
+              {date === app.today
+                ? lang === "en" ? "Today" : "আজ"
+                : num(date.slice(8, 10), lang) + "/" + num(date.slice(5, 7), lang)}
+              {" · "}{num(time, lang)} · {num(seats, lang)}{" "}
               {t(seats === 1 ? "seatNeeded" : "seatsNeeded", lang)}
             </span>
           </span>
@@ -101,7 +107,17 @@ export const FindFlow = ({
             <div style={{ height: 14 }} />
             <ZonePicker value={destination} onChange={setDestination} lang={lang} exclude={origin} label={t("to", lang)} />
             <div style={{ height: 14 }} />
-            <label className="label" htmlFor="find-time">{t("searchWhen", lang)}</label>
+            <label className="label" htmlFor="find-date">{t("searchWhen", lang)}</label>
+            <input
+              id="find-date"
+              className="input"
+              type="date"
+              value={date}
+              min={app.today}
+              onChange={(e) => setDate(e.target.value)}
+            />
+            <div style={{ height: 12 }} />
+            <label className="label" htmlFor="find-time">{t("departureTime", lang)}</label>
             <input id="find-time" className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
             <div style={{ height: 14 }} />
             <span className="label">{t("seatsNeeded", lang)}</span>
@@ -181,7 +197,7 @@ export const FindFlow = ({
                   app.addAlert({
                     originZoneId: origin,
                     destinationZoneId: destination,
-                    targetTime: `${app.today}T${time}:00+06:00`,
+                    targetTime: `${date}T${time}:00+06:00`,
                     windowMinutes: 30,
                     seats,
                   });
@@ -242,9 +258,9 @@ const BookingSheet = ({
   const walkTo = (zid: string) =>
     match.ride.pickupPoints.find((p) => p.zoneId === zid)?.walkingMinutes ?? 10;
 
-  const confirm = () => {
+  const confirm = async () => {
     if (!counterfactual) return;
-    const r = app.book({
+    const r = await app.book({
       rideId: match.ride.id,
       boardZoneId,
       alightZoneId,
@@ -364,7 +380,11 @@ const BookingSheet = ({
 
           <div className="btnrow">
             <button className="btn ghost" onClick={onClose}>{t("cancel", lang)}</button>
-            <button className="btn primary" disabled={!counterfactual} onClick={confirm}>
+            <button
+              className="btn primary"
+              disabled={!counterfactual}
+              onClick={() => void confirm()}
+            >
               {t("confirm", lang)}
             </button>
           </div>

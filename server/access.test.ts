@@ -27,6 +27,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "ekpothe-"));
   db = new Db(join(dir, "t.db"));
   access = new Access(db, {
+    mode: "domain",
     allowedDomains: ["example.org"],
     autoApproveDomains: [],
     canSendEmail: false,
@@ -223,6 +224,7 @@ describe("generateCode", () => {
 describe("automatic approval", () => {
   const withEmail = (canSendEmail: boolean) =>
     new Access(db, {
+      mode: "domain",
       allowedDomains: ["giz.de"],
       autoApproveDomains: ["giz.de"],
       canSendEmail,
@@ -267,6 +269,7 @@ describe("automatic approval", () => {
 
   it("does not auto-approve a domain that is allowed but not listed for it", () => {
     const a = new Access(db, {
+      mode: "domain",
       allowedDomains: ["giz.de", "partner.org"],
       autoApproveDomains: ["giz.de"],
       canSendEmail: true,
@@ -274,5 +277,87 @@ describe("automatic approval", () => {
     });
     expect(a.request("colleague@partner.org", "P", "1.2.3.4").code).toBeUndefined();
     expect(a.pending().map((p) => p.email)).toEqual(["colleague@partner.org"]);
+  });
+});
+
+
+/**
+ * Invite mode — the pilot default.
+ *
+ * No email is asked for or stored. The point is not convenience: an address
+ * like nusrat@giz.de identifies a named person *and* their employer, and ties a
+ * record of their daily movements to both. Without it the database holds a
+ * chosen display name and some journeys, which is a much smaller thing to be
+ * responsible for while finding out whether colleagues will use a carpool.
+ */
+describe("invite mode", () => {
+  const inviteOnly = () =>
+    new Access(db, {
+      mode: "invite",
+      allowedDomains: [],
+      autoApproveDomains: [],
+      canSendEmail: false,
+      ipPepper: "test-pepper",
+    });
+
+  it("mints a code for a named colleague, with no email involved", () => {
+    const a = inviteOnly();
+    const { code, userId } = a.invite("Nusrat Jahan", "admin");
+    expect(code).toMatch(/^[A-Z2-9]{6}$/);
+    expect(a.redeemByCode(code)).toBe(userId);
+  });
+
+  it("stores no real email address", () => {
+    const a = inviteOnly();
+    const { userId } = a.invite("Nusrat Jahan", "admin");
+    const row = db.get<{ email: string }>("SELECT email FROM users WHERE id = ?", userId)!;
+    // A placeholder that satisfies the unique index and is never contactable.
+    expect(row.email).toBe(`invite:${userId}`);
+    expect(row.email).not.toContain("@");
+  });
+
+  it("lets a colleague set the name they want to be known by", () => {
+    const a = inviteOnly();
+    const { code, userId } = a.invite("seat 3", "admin");
+    a.redeemByCode(code, "Nusrat J.");
+    const row = db.get<{ displayName: string }>("SELECT displayName FROM users WHERE id = ?", userId)!;
+    expect(row.displayName).toBe("Nusrat J.");
+  });
+
+  it("consumes the code, so a forwarded code is worthless", () => {
+    const a = inviteOnly();
+    const { code } = a.invite("Nusrat", "admin");
+    expect(a.redeemByCode(code)).toBeDefined();
+    expect(a.redeemByCode(code)).toBeUndefined();
+  });
+
+  it("refuses a code that was never issued", () => {
+    expect(inviteOnly().redeemByCode("AAAAAA")).toBeUndefined();
+  });
+
+  it("refuses a suspended colleague's unused code", () => {
+    const a = inviteOnly();
+    const { code, userId } = a.invite("Nusrat", "admin");
+    a.suspend(userId, "admin");
+    expect(a.redeemByCode(code)).toBeUndefined();
+  });
+
+  it("keeps each colleague's code to themselves", () => {
+    const a = inviteOnly();
+    const one = a.invite("Nusrat", "admin");
+    const two = a.invite("Tanvir", "admin");
+    expect(a.redeemByCode(one.code)).toBe(one.userId);
+    expect(a.redeemByCode(two.code)).toBe(two.userId);
+  });
+
+  it("never auto-approves, since there is no address to verify", () => {
+    const a = new Access(db, {
+      mode: "invite",
+      allowedDomains: ["giz.de"],
+      autoApproveDomains: ["giz.de"],
+      canSendEmail: true,
+      ipPepper: "test-pepper",
+    });
+    expect(a.autoApproves("nusrat@giz.de")).toBe(false);
   });
 });

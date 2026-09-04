@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api } from "./api.js";
 import type { Booking, CounterfactualMode, SettlementMode } from "../domain/entities/booking.js";
 import type { Ride } from "../domain/entities/ride.js";
 import type { User } from "../domain/entities/user.js";
@@ -45,11 +46,55 @@ export const COLLEAGUES: readonly User[] = [
   { ...ME, id: "u-shirin", displayName: "Shirin Akter", department: "Programmes", reliabilityScore: 100 },
 ];
 
-export const userById = (id: string): User | undefined =>
-  id === ME.id ? ME : COLLEAGUES.find((u) => u.id === id);
+/**
+ * Live colleagues, published by the store once the server answers.
+ *
+ * A module-level cache rather than context so the small presentational
+ * components that only need a name do not each have to be threaded through.
+ */
+let livePeople: readonly { id: string; displayName: string; department: string; reliabilityScore: number }[] = [];
+export const setLivePeople = (p: readonly { id: string; displayName: string; department: string; reliabilityScore: number }[]): void => {
+  livePeople = p;
+};
 
-const TODAY = "2026-09-04";
-const at = (time: string, date = TODAY): string => `${date}T${time}:00+06:00`;
+export const userById = (id: string): User | undefined => {
+  const live = livePeople.find((u) => u.id === id);
+  if (live) {
+    return { ...ME, id: live.id, displayName: live.displayName, department: live.department, reliabilityScore: live.reliabilityScore };
+  }
+  return id === ME.id ? ME : COLLEAGUES.find((u) => u.id === id);
+};
+
+/**
+ * Today, in Dhaka.
+ *
+ * Read from the clock rather than pinned to a constant. A hardcoded date meant
+ * that on any other day the offer flow proposed a departure already in the
+ * past, which the server correctly refused — so publishing simply stopped
+ * working, silently, the day after the constant was written.
+ */
+const dhakaToday = (): string =>
+  new Date(Date.now() + 6 * 3600_000).toISOString().slice(0, 10);
+
+const TODAY = dhakaToday();
+
+/**
+ * The date a new ride defaults to.
+ *
+ * Tomorrow, because a commute posted for a time that has already passed today
+ * is unbookable, and because the overwhelmingly common case is arranging
+ * tomorrow morning.
+ */
+export const defaultRideDate = (): string =>
+  new Date(Date.now() + 6 * 3600_000 + 86_400_000).toISOString().slice(0, 10);
+/**
+ * Demo rides are seeded for tomorrow, matching the offer and find defaults.
+ *
+ * Seeding them for today left the standalone demo showing nothing on its own
+ * default search — a first impression of an empty app, which is exactly the
+ * impression this product cannot afford to give.
+ */
+const at = (time: string, date = defaultRideDate()): string => `${date}T${time}:00+06:00`;
 
 const octane = priceOnDate(FUEL_PRICES, "octane", TODAY)!;
 
@@ -159,6 +204,60 @@ export const planner = new RouteTablePlanner(
 export const useApp = () => {
   const [rides, setRides] = useState<readonly Ride[]>(SEED_RIDES);
   const [bookings, setBookings] = useState<readonly Booking[]>([]);
+  /**
+   * Whether a pilot server is answering.
+   *
+   * When it is, rides and bookings are the organisation's real ones and every
+   * colleague sees the same list — which is the entire point of a pilot. When
+   * it is not, this is the standalone demo build and the seeded rides stand in.
+   */
+  const [live, setLive] = useState(false);
+  const [me, setMe] = useState<{ userId: string; displayName: string } | undefined>();
+  /**
+   * Real colleagues, from the server.
+   *
+   * Names only. Without this a ride published by Ruman rendered under a demo
+   * persona's name, because the lookup fell through to the seeded list — which
+   * is worse than showing nothing: it attributes a colleague's journey to
+   * somebody else.
+   */
+  const [people, setPeople] = useState<readonly { id: string; displayName: string; department: string; reliabilityScore: number }[]>([]);
+
+  const refresh = useCallback(async () => {
+    const [r, b, p] = await Promise.all([api.rides(), api.myBookings(), api.people()]);
+    if (p.ok && p.value) {
+      setPeople(p.value.people);
+      setLivePeople(p.value.people);
+    }
+    if (r.ok && r.value) {
+      setRides(r.value.rides);
+      setLive(true);
+    }
+    if (b.ok && b.value) setBookings(b.value.bookings);
+  }, []);
+
+  /**
+   * Identify the signed-in colleague and load their view.
+   *
+   * Exposed as well as run on mount, because the store is created before the
+   * access gate is passed: the mount-time call sees a 401, and without a way to
+   * re-run it the app stayed on seeded demo rides and wrote nowhere, while
+   * looking entirely normal. The gate calls this the moment sign-in succeeds.
+   */
+  const reload = useCallback(async () => {
+    const r = await api.me();
+    if (r.ok && r.value) {
+      setMe({ userId: r.value.userId, displayName: r.value.displayName });
+      await refresh();
+    }
+  }, [refresh]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  /** Who "I" am: the signed-in colleague, or the demo persona offline. */
+  const identity = me ?? { userId: ME.id, displayName: ME.displayName };
   const [alerts, setAlerts] = useState<readonly SearchQuery[]>([]);
   const [ledger, setLedger] = useState<readonly CreditEntry[]>([]);
   const [feedback, setFeedback] = useState<readonly Feedback[]>([]);
@@ -177,8 +276,8 @@ export const useApp = () => {
    * Returns a DomainError rather than throwing, because "that seat just went"
    * is a normal outcome the UI must render.
    */
-  const book = useCallback(
-    (input: {
+  const bookRemote = useCallback(
+    async (input: {
       rideId: string;
       boardZoneId: string;
       alightZoneId: string;
@@ -186,7 +285,43 @@ export const useApp = () => {
       counterfactualMode: CounterfactualMode;
       settlementMode: SettlementMode;
       idempotencyKey: string;
-    }): { ok: true; booking: Booking } | { ok: false; error: DomainError } => {
+    }): Promise<{ ok: true; booking: Booking } | { ok: false; error: DomainError }> => {
+      const res = await api.book(input);
+      if (res.ok && res.value) {
+        await refresh();
+        return { ok: true, booking: res.value };
+      }
+      // The server has already applied the same domain rules, so its refusal is
+      // the authoritative one and is shown as written.
+      return {
+        ok: false,
+        error: { code: "SEAT_TAKEN", message: res.error ?? "That seat just went." },
+      };
+    },
+    [refresh],
+  );
+
+  const publishRemote = useCallback(
+    async (ride: Ride): Promise<boolean> => {
+      const res = await api.publish(ride);
+      if (res.ok) await refresh();
+      return res.ok;
+    },
+    [refresh],
+  );
+
+  const book = useCallback(
+    async (input: {
+      rideId: string;
+      boardZoneId: string;
+      alightZoneId: string;
+      seats: number;
+      counterfactualMode: CounterfactualMode;
+      settlementMode: SettlementMode;
+      idempotencyKey: string;
+    }): Promise<{ ok: true; booking: Booking } | { ok: false; error: DomainError }> => {
+      // Async even offline, so callers see one contract whether or not a pilot
+      // server is answering.
       const ride = rides.find((r) => r.id === input.rideId);
       if (!ride) {
         return { ok: false, error: { code: "NOT_FOUND", message: "That ride no longer exists." } };
@@ -263,9 +398,14 @@ export const useApp = () => {
     [rides, bookings],
   );
 
-  const publish = useCallback((ride: Ride) => {
-    setRides((rs) => [...rs, ride]);
-  }, []);
+  const publish = useCallback(
+    async (ride: Ride): Promise<boolean> => {
+      if (live) return publishRemote(ride);
+      setRides((rs) => [...rs, ride]);
+      return true;
+    },
+    [live, publishRemote],
+  );
 
   /**
    * Complete a trip: mark the booking, then write the ledger entry.
@@ -350,10 +490,13 @@ export const useApp = () => {
   }, []);
 
   const myBookings = useMemo(
-    () => bookings.filter((b) => b.riderId === ME.id),
-    [bookings],
+    () => bookings.filter((b) => b.riderId === identity.userId),
+    [bookings, identity.userId],
   );
-  const myRides = useMemo(() => rides.filter((r) => r.driverId === ME.id), [rides]);
+  const myRides = useMemo(
+    () => rides.filter((r) => r.driverId === identity.userId),
+    [rides, identity.userId],
+  );
 
   /** Visible liquidity. An empty-looking marketplace is abandoned immediately. */
   const corridorActivity = useMemo(
@@ -369,8 +512,12 @@ export const useApp = () => {
 
   return {
     rides, bookings, myBookings, myRides, alerts, ledger, feedback, incidents,
-    search, book, publish, addAlert, corridorActivity, planRoute,
+    search, publish, addAlert, corridorActivity, planRoute,
     completeTrip, rate, reportIncident, ratingFor,
+    // Against a live server the booking goes to the server, where the seat
+    // race and every other invariant is settled authoritatively.
+    book: live ? bookRemote : book,
+    live, identity, refresh, reload, people,
     today: TODAY, dateOf,
   };
 };

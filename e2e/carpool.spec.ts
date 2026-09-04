@@ -217,7 +217,9 @@ test("the whole interface switches to Bangla", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /একপথে/ })).toBeVisible();
   await expect(page.getByText("রাইড অফার করুন").first()).toBeVisible();
   // Numbers use Bangla-Indic digits, not Latin ones.
-  await expect(page.locator(".card").filter({ hasText: "সহকর্মী" })).toContainText(/[০-৯]/);
+  // The live-activity card specifically: several cards mention colleagues now,
+  // so match the one that carries a count.
+  await expect(page.locator(".card").filter({ hasText: "সপ্তাহে" }).first()).toContainText(/[০-৯]/);
 });
 
 test("touch targets meet the 44px minimum", async ({ page }) => {

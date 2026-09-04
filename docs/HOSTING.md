@@ -279,3 +279,43 @@ Total cost to find out whether this works: **nothing**.
 - [ ] You tried a personal address and got *"Sorry! You are not in our
       organisation…"*
 - [ ] You signed in as admin and can see the pending queue
+
+---
+
+## Appendix — free hosting that actually keeps your data
+
+Added after the pilot decision to run entirely on free tiers.
+
+**The trap is ephemeral disk.** Most free plans wipe the filesystem on every
+restart or redeploy. Ekpothe keeps everything in one SQLite file, so a free plan
+without a persistent volume means **the pilot data disappears** — usually right
+when you want to show somebody the numbers.
+
+| Option | Free | Data survives? | HTTPS | For Sunday |
+|---|---|---|---|---|
+| **Fly.io** + 1 GB volume | Free allowance | **Yes** | Automatic | **Take this** |
+| Oracle Cloud Always Free | Yes, indefinitely | Yes (real VM) | Via Caddy | Better long-term, ~2 hours |
+| Render free | Yes | **No disk on free** | Automatic | Demo only |
+| Railway / Koyeb free | Trial credits | Usually not | Automatic | Same caveat |
+
+Free-tier terms change; check what Fly currently includes, and take the backup
+in the checklist regardless of what it says.
+
+### Security on a free tier
+
+Free does not mean less safe here, because the protections are in the app rather
+than the plan:
+
+- TLS is automatic on all of these, and the app refuses to serve without it
+- HSTS, `nosniff`, `Referrer-Policy` and `X-Frame-Options` on every response
+- Invite codes stored as scrypt hashes
+- Session cookies `HttpOnly`, `SameSite=Lax`, `Secure`
+- Seat races settled in SQL, not in application code
+- **No email addresses collected at all in pilot mode**
+
+The one thing a free tier genuinely costs you is **durability**. Take a backup
+after each day of the pilot:
+
+```bash
+fly ssh console -C "cp /data/carpool.db /data/backup-$(date +%F).db"
+```

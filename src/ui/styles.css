@@ -108,26 +108,60 @@ body {
 }
 .topbar .spacer { flex: 1; }
 
-.wordmark {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0;
+/* ---------- the mark ----------
+   Glyph, then the two scripts stacked and locked together. Kept in one
+   component so the header, the sign-in screen and any future splash cannot
+   drift apart. */
+.wordmark { margin: 0; display: flex; }
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--green-900);
+}
+.mark-glyph { display: flex; color: var(--green-600); flex: none; }
+.mark-words { display: flex; flex-direction: column; line-height: 1; }
+.mark-latin {
   font-family: var(--font-display);
   font-size: 21px;
   font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--green-900);
+  letter-spacing: -0.025em;
   font-optical-sizing: auto;
 }
-.wordmark .sub {
-  font-family: var(--font-body);
-  font-size: 11px;
+.mark-bangla {
+  font-family: var(--font-bn);
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: lowercase;
-  color: var(--ink-faint);
+  color: var(--green-600);
+  letter-spacing: 0.02em;
+  margin-top: 2px;
 }
+.mark.hero { gap: 14px; }
+.mark.hero .mark-glyph svg { width: 52px; height: 18px; }
+.mark.hero .mark-latin { font-size: 38px; letter-spacing: -0.03em; }
+.mark.hero .mark-bangla { font-size: 19px; margin-top: 4px; }
+
+/* ---------- "not an official system" ----------
+   Stated wherever a colleague makes a commitment: at the door, beside the
+   disclaimer, and under the About panel. Quieter than the red disclaimer
+   because it is context rather than a warning, but never absent. */
+.unofficial {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  padding: 11px 13px;
+  margin-bottom: 14px;
+}
+.unofficial .mark-i {
+  font-size: 14px;
+  line-height: 1.4;
+  flex: none;
+}
+.unofficial p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-soft); }
+.unofficial strong { color: var(--ink); font-weight: 650; }
 
 .langtoggle {
   display: flex;

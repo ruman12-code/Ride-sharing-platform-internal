@@ -134,6 +134,21 @@ export class Api {
     return { name: subject.displayName, kind: subject.contactKind, value: subject.contactValue };
   }
 
+  /**
+   * Names of everyone who can appear on a ride card.
+   *
+   * Display name, department and reliability only. Contact details are
+   * deliberately absent: those are exchanged per booking, never listed
+   * (domain/policy/contact-exchange.ts), and a directory endpoint is exactly
+   * the shape that would undo that.
+   */
+  listPeople(): readonly { id: Id; displayName: string; department: string; reliabilityScore: number }[] {
+    return this.db.all(
+      `SELECT id, displayName, department, reliabilityScore
+         FROM users WHERE status = 'approved' AND isSuspended = 0`,
+    );
+  }
+
   // --- rides ------------------------------------------------------------
 
   listRides(): readonly Ride[] {

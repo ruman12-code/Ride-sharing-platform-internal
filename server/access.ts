@@ -97,7 +97,35 @@ export const MAX_REQUESTS_PER_HOUR = 5;
 const hashIp = (ip: string, pepper: string): string =>
   createHash("sha256").update(`${pepper}:${ip}`).digest("hex");
 
+/**
+ * How colleagues get in.
+ *
+ * `invite`  — the pilot default. No email address is asked for or stored. The
+ *             administrator generates codes and hands them to colleagues
+ *             directly, and a colleague signs in with a code and a display name
+ *             of their choosing.
+ *
+ * `domain`  — an email address on an allowed work domain, approved either by
+ *             the administrator or automatically when the code can be emailed.
+ *
+ * `invite` exists because collecting employer email addresses is the single
+ * thing that most changes this from a colleague's side project into something
+ * an employer's data protection office has to have a view on. An address like
+ * `nusrat@giz.de` identifies a named person *and* their employer, and ties a
+ * record of their daily movements to both.
+ *
+ * Without it the database holds a display name somebody chose and the journeys
+ * they published. That is a much smaller thing to be responsible for, and it is
+ * enough to find out whether colleagues will use a carpool at all — which is
+ * the only question a pilot needs to answer.
+ *
+ * It is also the stronger gate. A code handed over in person is better evidence
+ * than an unverified claim to own an address at a given domain.
+ */
+export type AccessMode = "invite" | "domain";
+
 export interface AccessOptions {
+  readonly mode: AccessMode;
   /** Domains that may request access at all. */
   readonly allowedDomains: readonly string[];
   /**
@@ -117,10 +145,13 @@ export class Access {
   private readonly canSendEmail: boolean;
   private readonly ipPepper: string;
 
+  readonly mode: AccessMode;
+
   constructor(
     private readonly db: Db,
     options: AccessOptions,
   ) {
+    this.mode = options.mode;
     this.allowedDomains = options.allowedDomains;
     this.autoApproveDomains = options.autoApproveDomains;
     this.canSendEmail = options.canSendEmail;
@@ -134,7 +165,67 @@ export class Access {
    * is unverified and the domain proves nothing.
    */
   autoApproves(email: string): boolean {
-    return this.canSendEmail && emailIsAllowed(email, this.autoApproveDomains);
+    return (
+      this.mode === "domain" &&
+      this.canSendEmail &&
+      emailIsAllowed(email, this.autoApproveDomains)
+    );
+  }
+
+  /**
+   * Mint a code for somebody the administrator is about to invite.
+   *
+   * No email, no request, no queue. The administrator types a name they
+   * recognise, gets a code, and passes it on however they normally talk to that
+   * colleague. The placeholder address exists only to satisfy the unique index
+   * and is never shown, never emailed, and never treated as contactable.
+   */
+  invite(displayName: string, adminId: string): { code: string; userId: string } {
+    const userId = randomUUID();
+    this.db.run(
+      `INSERT INTO users (id, displayName, email, status, createdAt)
+       VALUES (?, ?, ?, 'pending', ?)`,
+      userId,
+      displayName.trim().slice(0, 80) || "Colleague",
+      `invite:${userId}`,
+      new Date().toISOString(),
+    );
+    const issued = this.approve(userId, adminId)!;
+    return { code: issued.code, userId };
+  }
+
+  /**
+   * Redeem a code without an email address.
+   *
+   * Used in invite mode: the code alone identifies the row, because it was
+   * minted for exactly one person. A colleague may set the display name they
+   * want to be known by at the same time.
+   */
+  redeemByCode(code: string, displayName?: string): string | undefined {
+    const rows = this.db.all<{ id: string; userId: string; codeHash: string; salt: string; expiresAt: string }>(
+      `SELECT c.id, c.userId, c.codeHash, c.salt, c.expiresAt
+         FROM invite_codes c JOIN users u ON u.id = c.userId
+        WHERE c.usedAt IS NULL AND u.status = 'approved'`,
+    );
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      if (row.expiresAt < now) continue;
+      const given = Buffer.from(hashCode(code, row.salt), "hex");
+      const want = Buffer.from(row.codeHash, "hex");
+      if (given.length === want.length && timingSafeEqual(given, want)) {
+        this.db.run("UPDATE invite_codes SET usedAt = ? WHERE id = ?", now, row.id);
+        if (displayName?.trim()) {
+          this.db.run(
+            "UPDATE users SET displayName = ? WHERE id = ?",
+            displayName.trim().slice(0, 80),
+            row.userId,
+          );
+        }
+        this.db.audit(row.userId, "user", row.userId, "redeem-code");
+        return row.userId;
+      }
+    }
+    return undefined;
   }
 
   /**

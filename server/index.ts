@@ -60,12 +60,13 @@ const SECURE = OWN_TLS || TRUST_PROXY;
  * "anyone", because the failure mode of a permissive default here is a stranger
  * inside the app and nobody noticing.
  */
+const ACCESS_MODE = process.env["ACCESS_MODE"] === "domain" ? "domain" : "invite";
 const ALLOWED_DOMAINS = parseAllowedDomains(process.env["ALLOWED_EMAIL_DOMAINS"]);
-if (ALLOWED_DOMAINS.length === 0) {
+
+if (ACCESS_MODE === "domain" && ALLOWED_DOMAINS.length === 0) {
   console.error(
-    "ALLOWED_EMAIL_DOMAINS is not set.\n" +
-      "Refusing to start: without it there is nothing stopping any email address\n" +
-      "from requesting access.\n" +
+    "ACCESS_MODE=domain needs ALLOWED_EMAIL_DOMAINS.\n" +
+      "Refusing to start: without it nothing stops any address requesting access.\n" +
       "  ALLOWED_EMAIL_DOMAINS='yourcompany.org' node dist-server/server/index.js",
   );
   process.exit(1);
@@ -85,8 +86,17 @@ const AUTO_APPROVE_DOMAINS = parseAllowedDomains(
 /** Public address of the app, used in the email that carries the code. */
 const APP_URL = process.env["APP_URL"] ?? `http://localhost:${PORT}`;
 
-/** The first administrator, who approves everybody else. */
-const ADMIN_EMAIL = (process.env["ADMIN_EMAIL"] ?? "").trim().toLowerCase();
+/**
+ * The first administrator.
+ *
+ * In domain mode this is their work address. In invite mode it is only an
+ * identifier for the seeded admin row — nothing is ever sent to it — so a
+ * placeholder is used when none is given, and no employer address need be
+ * stored at all.
+ */
+const ADMIN_EMAIL =
+  (process.env["ADMIN_EMAIL"] ?? "").trim().toLowerCase() ||
+  (ACCESS_MODE === "invite" ? "invite:admin" : "");
 if (!ADMIN_EMAIL) {
   console.error(
     "ADMIN_EMAIL is not set.\n" +
@@ -100,6 +110,7 @@ const db = new Db(DB_PATH);
 const api = new Api(db);
 const mailer = createMailer();
 const access = new Access(db, {
+  mode: ACCESS_MODE,
   allowedDomains: ALLOWED_DOMAINS,
   autoApproveDomains: AUTO_APPROVE_DOMAINS,
   canSendEmail: mailer.enabled,
@@ -120,11 +131,14 @@ const access = new Access(db, {
     db.run(
       `INSERT INTO users (id, displayName, email, role, status, createdAt)
        VALUES (?, ?, ?, 'admin', 'pending', ?)`,
-      id, ADMIN_EMAIL.split("@")[0], ADMIN_EMAIL, new Date().toISOString(),
+      id,
+      ACCESS_MODE === "invite" ? "Admin" : ADMIN_EMAIL.split("@")[0],
+      ADMIN_EMAIL,
+      new Date().toISOString(),
     );
     const issued = access.approve(id, "system");
     console.log("");
-    console.log(`  ADMIN CODE for ${ADMIN_EMAIL}: ${issued?.code}`);
+    console.log(`  ADMIN CODE: ${issued?.code}`);
     console.log("  Use it once to sign in. It is not stored and will not be shown again.");
   }
 }
@@ -204,6 +218,15 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
 
         // Open endpoints: asking for access, and redeeming a code.
         if (url.pathname === "/api/request-access" && req.method === "POST") {
+          if (ACCESS_MODE === "invite") {
+            return send(200, {
+              ok: false,
+              inviteOnly: true,
+              message:
+                "Ekpothe is invite-only during the pilot. Ask the colleague who " +
+                "shared it with you for a code.",
+            });
+          }
           const b = await body(req);
           const ip =
             (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
@@ -225,7 +248,13 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
 
         if (url.pathname === "/api/sign-in" && req.method === "POST") {
           const b = await body(req);
-          const userId = access.redeem(String(b["email"] ?? ""), String(b["code"] ?? ""));
+          const code = String(b["code"] ?? "");
+          // In invite mode the code alone identifies the person: it was minted
+          // for exactly one of them, so no address is needed or wanted.
+          const userId =
+            ACCESS_MODE === "invite"
+              ? access.redeemByCode(code, String(b["displayName"] ?? ""))
+              : access.redeem(String(b["email"] ?? ""), code);
           // One message for every failure. Distinguishing "not approved" from
           // "wrong code" would turn this into a way of finding out who works here.
           if (!userId) {
@@ -248,6 +277,9 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
 
         if (!session) return send(401, { error: "Not signed in." });
 
+        if (url.pathname === "/api/people" && req.method === "GET") {
+          return send(200, { people: api.listPeople() });
+        }
         if (url.pathname === "/api/rides" && req.method === "GET") {
           return send(200, { rides: api.listRides() });
         }
@@ -298,6 +330,10 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
               ? send(200, issued)
               : send(404, { error: "No such request." });
           }
+          if (url.pathname === "/api/admin/invite" && req.method === "POST") {
+            const b = await body(req);
+            return send(200, access.invite(String(b["displayName"] ?? ""), session.userId));
+          }
           if (url.pathname === "/api/admin/suspend" && req.method === "POST") {
             const b = await body(req);
             access.suspend(String(b["userId"] ?? ""), session.userId);
@@ -347,13 +383,17 @@ server.listen(PORT, HOST, () => {
   console.log(`Ekpothe — pilot server`);
   console.log(`  ${scheme}://${HOST === "0.0.0.0" ? "0.0.0.0" : "localhost"}:${PORT}`);
   console.log(`  database:   ${DB_PATH}`);
-  console.log(`  domains:    ${ALLOWED_DOMAINS.map((d) => `@${d}`).join(", ")}`);
-  console.log(
-    mailer.enabled
-      ? `  joining:    automatic — codes emailed to ${AUTO_APPROVE_DOMAINS.map((d) => `@${d}`).join(", ")}`
-      : "  joining:    manual — no SMTP configured, so codes are relayed by the admin",
-  );
-  console.log(`  admin:      ${ADMIN_EMAIL}`);
+  if (ACCESS_MODE === "invite") {
+    console.log("  access:     invite-only — no email addresses asked for or stored");
+    console.log("  joining:    you mint a code in Admin and hand it to a colleague");
+  } else {
+    console.log(`  access:     ${ALLOWED_DOMAINS.map((d) => `@${d}`).join(", ")}`);
+    console.log(
+      mailer.enabled
+        ? `  joining:    automatic — codes emailed to ${AUTO_APPROVE_DOMAINS.map((d) => `@${d}`).join(", ")}`
+        : "  joining:    manual — no SMTP configured, so codes are relayed by the admin",
+    );
+  }
   if (OWN_TLS) {
     console.log(`  TLS:        this process, from TLS_CERT and TLS_KEY`);
   } else if (TRUST_PROXY) {

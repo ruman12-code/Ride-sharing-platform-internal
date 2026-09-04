@@ -35,6 +35,7 @@ export const STRINGS = {
   of: { en: "of", bn: "/" },
   route: { en: "Route", bn: "রুট" },
   when: { en: "When", bn: "কখন" },
+  departureTime: { en: "Departure time", bn: "ছাড়ার সময়" },
   seatsAndCar: { en: "Seats & car", bn: "সিট ও গাড়ি" },
   costShare: { en: "Cost share", bn: "খরচ ভাগ" },
   from: { en: "From", bn: "কোথা থেকে" },
@@ -93,6 +94,41 @@ export const STRINGS = {
     bn: "আপনি নিজের ইচ্ছায়, স্বেচ্ছায় আপনার রাইড শেয়ারিং তথ্য দিচ্ছেন",
   },
   disclaimerHeading: { en: "Disclaimer", bn: "দাবিত্যাগ" },
+
+  /**
+   * Stated wherever a colleague commits to something: at the door, next to the
+   * disclaimer, and in About. It protects the colleague — who should know what
+   * they are joining — and the person who built it, who should not be taken to
+   * be speaking for the organisation.
+   */
+  unofficialTitle: { en: "Not an official system", bn: "এটি প্রাতিষ্ঠানিক ব্যবস্থা নয়" },
+  unofficial: {
+    en: "Ekpothe is a voluntary tool built by a colleague. It is not run by, endorsed by, or connected to your employer, and taking part is entirely your choice.",
+    bn: "একপথে একজন সহকর্মীর তৈরি একটি স্বেচ্ছামূলক টুল। এটি আপনার প্রতিষ্ঠান পরিচালিত বা অনুমোদিত নয়, এবং অংশ নেওয়া সম্পূর্ণ আপনার ইচ্ছা।",
+  },
+  unofficialShort: {
+    en: "A colleague's voluntary tool — not an official system.",
+    bn: "সহকর্মীর স্বেচ্ছামূলক টুল — প্রাতিষ্ঠানিক ব্যবস্থা নয়।",
+  },
+
+  // Invite-only pilot
+  inviteOnlyTitle: { en: "You'll need a code", bn: "আপনার একটি কোড লাগবে" },
+  inviteOnlyBody: {
+    en: "Ekpothe is invite-only while we try it out. Ask the colleague who told you about it, and they'll send you a code.",
+    bn: "পরীক্ষামূলক পর্যায়ে একপথে শুধু আমন্ত্রণে চলে। যিনি আপনাকে জানিয়েছেন তাঁর কাছে কোড চান।",
+  },
+  whatToCallYou: { en: "What should colleagues call you?", bn: "সহকর্মীরা আপনাকে কী নামে ডাকবেন?" },
+  nameHint: {
+    en: "However you'd like to appear. A first name is plenty.",
+    bn: "যেভাবে দেখাতে চান। শুধু নামের প্রথম অংশই যথেষ্ট।",
+  },
+  noEmailNeeded: {
+    en: "No email address is asked for or stored.",
+    bn: "কোনো ইমেইল ঠিকানা চাওয়া বা সংরক্ষণ করা হয় না।",
+  },
+  inviteColleague: { en: "Invite a colleague", bn: "সহকর্মীকে আমন্ত্রণ" },
+  theirName: { en: "Their name", bn: "তাঁর নাম" },
+  generateCode: { en: "Create a code", bn: "কোড তৈরি করুন" },
 
   // Contribution — what, if anything, the rider gives the driver
   whatDoYouAsk: { en: "What would you like in return?", bn: "বিনিময়ে কী চান?" },

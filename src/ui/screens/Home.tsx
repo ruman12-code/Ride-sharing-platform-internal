@@ -1,5 +1,6 @@
 import { type Lang, num, t, taka } from "../i18n.js";
 import { Strapline } from "../components/Strapline.jsx";
+import { Unofficial } from "../components/Unofficial.jsx";
 import { timeOf, zoneName } from "../components/common.jsx";
 import { userById, type App } from "../store.js";
 
@@ -79,6 +80,9 @@ export const Home = ({
         <Strapline lang={lang} />
         <p className="hint" style={{ marginTop: 14 }}>{t("aboutBody", lang)}</p>
         <p className="hint" style={{ marginTop: 10, fontWeight: 600 }}>{t("tagline", lang)}</p>
+        <div style={{ marginTop: 14 }}>
+          <Unofficial lang={lang} />
+        </div>
       </div>
     </div>
   );
