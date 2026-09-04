@@ -2,6 +2,8 @@ import { useCallback, useMemo, useState } from "react";
 import type { Booking, CounterfactualMode, SettlementMode } from "../domain/entities/booking.js";
 import type { Ride } from "../domain/entities/ride.js";
 import type { User } from "../domain/entities/user.js";
+import type { CreditEntry } from "../domain/entities/ledger.js";
+import type { Feedback, Incident, IncidentCategory } from "../domain/entities/support.js";
 import { ZONES, zoneById } from "../adapters/local-json/seed/zones.js";
 import { ZoneGraphPlanner } from "../adapters/routing/zone-graph.js";
 import { ZoneGraph, type Route } from "../domain/matching/geo.js";
@@ -149,6 +151,9 @@ export const useApp = () => {
   const [rides, setRides] = useState<readonly Ride[]>(SEED_RIDES);
   const [bookings, setBookings] = useState<readonly Booking[]>([]);
   const [alerts, setAlerts] = useState<readonly SearchQuery[]>([]);
+  const [ledger, setLedger] = useState<readonly CreditEntry[]>([]);
+  const [feedback, setFeedback] = useState<readonly Feedback[]>([]);
+  const [incidents, setIncidents] = useState<readonly Incident[]>([]);
 
   const index = useMemo(() => new RideIndex(rides), [rides]);
 
@@ -253,6 +258,84 @@ export const useApp = () => {
     setRides((rs) => [...rs, ride]);
   }, []);
 
+  /**
+   * Complete a trip: mark the booking, then write the ledger entry.
+   *
+   * The ledger records who owes whom. No money moves through this platform and
+   * credits are not redeemable for cash — that is what keeps the product
+   * outside Bangladesh Bank's payment regime. Do not add a cash-out path.
+   */
+  const completeTrip = useCallback((bookingId: string) => {
+    setBookings((bs) =>
+      bs.map((b) => (b.id === bookingId ? { ...b, status: "completed" as const } : b)),
+    );
+    setBookings((current) => {
+      const booking = current.find((b) => b.id === bookingId);
+      if (!booking) return current;
+      const ride = rides.find((r) => r.id === booking.rideId);
+      if (!ride) return current;
+      setLedger((l) =>
+        l.some((e) => e.bookingId === bookingId)
+          ? l // idempotent: completing twice must not double the entry
+          : [
+              ...l,
+              {
+                id: `ce-${l.length + 1}`,
+                bookingId,
+                fromUserId: booking.riderId,
+                toUserId: ride.driverId,
+                amount: booking.amount,
+                createdAt: at("09:00"),
+              },
+            ],
+      );
+      return current;
+    });
+  }, [rides]);
+
+  /** Ratings are aggregate-only. A rating is never shown attributed to its rater. */
+  const rate = useCallback(
+    (bookingId: string, rateeId: string, rating: 1 | 2 | 3 | 4 | 5, tags: string[] = []) => {
+      setFeedback((f) =>
+        f.some((x) => x.bookingId === bookingId && x.raterId === ME.id)
+          ? f
+          : [...f, { bookingId, raterId: ME.id, rateeId, rating, tags }],
+      );
+    },
+    [],
+  );
+
+  const reportIncident = useCallback(
+    (bookingId: string, category: IncidentCategory, description: string) => {
+      setIncidents((i) => [
+        ...i,
+        {
+          id: `inc-${i.length + 1}`,
+          bookingId,
+          reporterId: ME.id,
+          category,
+          severity: category === "safety" || category === "harassment" ? "high" : "low",
+          description,
+          status: "open",
+        },
+      ]);
+    },
+    [],
+  );
+
+  /** Average rating for a colleague. Never the individual scores. */
+  const ratingFor = useCallback(
+    (userId: string): { average: number; count: number } | undefined => {
+      const mine = feedback.filter((f) => f.rateeId === userId);
+      if (mine.length === 0) return undefined;
+      return {
+        average: Math.round((mine.reduce((s, f) => s + f.rating, 0) / mine.length) * 10) / 10,
+        count: mine.length,
+      };
+    },
+    [feedback],
+  );
+
   const addAlert = useCallback((q: SearchQuery) => {
     setAlerts((a) => [...a, q]);
   }, []);
@@ -276,8 +359,9 @@ export const useApp = () => {
   );
 
   return {
-    rides, bookings, myBookings, myRides, alerts,
+    rides, bookings, myBookings, myRides, alerts, ledger, feedback, incidents,
     search, book, publish, addAlert, corridorActivity, planRoute,
+    completeTrip, rate, reportIncident, ratingFor,
     today: TODAY, dateOf,
   };
 };

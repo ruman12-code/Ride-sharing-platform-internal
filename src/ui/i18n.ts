@@ -164,6 +164,42 @@ export const STRINGS = {
   fri: { en: "Fri", bn: "শুক্র" },
   sat: { en: "Sat", bn: "শনি" },
 
+  // Admin
+  admin: { en: "Admin", bn: "অ্যাডমিন" },
+  exportExcel: { en: "Export to Excel", bn: "এক্সেলে ডাউনলোড" },
+  exportHint: {
+    en: "Rides, bookings, balances, impact and fuel prices. A snapshot — nothing reads it back.",
+    bn: "রাইড, বুকিং, ব্যালেন্স, প্রভাব ও জ্বালানির দাম। এটি কেবল একটি স্ন্যাপশট।",
+  },
+  fuelRate: { en: "Fuel rate", bn: "জ্বালানির দাম" },
+  fuelStale: {
+    en: "This rate has not been confirmed for over 35 days. Confirm it is still correct, or enter the current gazetted rate.",
+    bn: "৩৫ দিনের বেশি সময় ধরে এই দাম নিশ্চিত করা হয়নি। সঠিক থাকলে নিশ্চিত করুন, নাহলে বর্তমান দাম দিন।",
+  },
+  confirmRate: { en: "Still correct", bn: "এখনো সঠিক" },
+  rateConfirmed: { en: "Confirmed today", bn: "আজ নিশ্চিত করা হয়েছে" },
+  dailyCap: { en: "Rides per driver per day", bn: "দৈনিক রাইড সীমা" },
+  ledger: { en: "Credit ledger", bn: "ক্রেডিট খাতা" },
+  ledgerNotMoney: {
+    en: "Credits are not money. They cannot be bought and cannot be cashed out — this is a record of who owes whom, settled outside the app.",
+    bn: "ক্রেডিট টাকা নয়। কেনা বা নগদে রূপান্তর করা যায় না — কে কার কাছে ঋণী তার হিসাব মাত্র।",
+  },
+  incidents: { en: "Incidents", bn: "ঘটনা" },
+  noIncidents: { en: "No open incidents.", bn: "কোনো খোলা ঘটনা নেই।" },
+  metrics: { en: "This week", bn: "এই সপ্তাহ" },
+  ridesPublished: { en: "Rides published", bn: "প্রকাশিত রাইড" },
+  completedTrips: { en: "Completed trips", bn: "সম্পন্ন ট্রিপ" },
+  zeroResults: { en: "Searches with no match", bn: "ফলাফলহীন সার্চ" },
+  carTripsAvoided: { en: "Car trips avoided", bn: "কম হওয়া গাড়ির ট্রিপ" },
+  legacyBaseline: { en: "vs 0.185/day legacy baseline", bn: "পুরোনো গড় ০.১৮৫/দিন এর তুলনায়" },
+
+  // Ratings
+  rateTrip: { en: "How was the ride?", bn: "যাত্রা কেমন ছিল?" },
+  ratingAnonymous: { en: "Shown as an average only. Never attributed.", bn: "শুধু গড় দেখানো হয়। কে দিয়েছে জানানো হয় না।" },
+  reportIssue: { en: "Report a problem", bn: "সমস্যা জানান" },
+  submit: { en: "Submit", bn: "জমা দিন" },
+  thanks: { en: "Thank you.", bn: "ধন্যবাদ।" },
+
   taka: { en: "Tk", bn: "৳" },
   home: { en: "Home", bn: "হোম" },
 } as const;

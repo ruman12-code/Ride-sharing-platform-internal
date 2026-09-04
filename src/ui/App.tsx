@@ -6,8 +6,9 @@ import { Home } from "./screens/Home.jsx";
 import { OfferFlow } from "./screens/OfferFlow.jsx";
 import { FindFlow } from "./screens/FindFlow.jsx";
 import { MyRides } from "./screens/MyRides.jsx";
+import { Admin } from "./screens/Admin.jsx";
 
-type Screen = "home" | "offer" | "find" | "mine";
+type Screen = "home" | "offer" | "find" | "mine" | "admin";
 
 export const App = () => {
   const app = useApp();
@@ -36,6 +37,7 @@ export const App = () => {
           <FindFlow app={app} lang={lang} onOfferInstead={() => setScreen("offer")} />
         )}
         {screen === "mine" && <MyRides app={app} lang={lang} />}
+        {screen === "admin" && <Admin app={app} lang={lang} />}
       </main>
 
       <nav className="tabbar" aria-label="Main">
@@ -44,6 +46,7 @@ export const App = () => {
           ["offer", "offerARide", "🚗"],
           ["find", "findARide", "🔎"],
           ["mine", "myRides", "☰"],
+          ["admin", "admin", "⚙"],
         ] as const).map(([id, key, glyph]) => (
           <button
             key={id}

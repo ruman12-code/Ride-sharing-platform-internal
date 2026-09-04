@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { type Lang, num, t, type StringKey } from "../i18n.js";
 import { ZONES } from "../store.js";
 
@@ -30,44 +30,125 @@ export const Progress = ({ step, total, lang }: { step: number; total: number; l
 );
 
 /**
- * A zone picker. Always a closed set of chips — never a text input.
+ * A zone picker: type to narrow, tap to choose.
  *
- * The legacy workbook allowed free text and one poster produced four spellings
- * of a single destination in five months, none of which could match each other
- * (LEGACY_AUDIT.md D-04).
+ * Still a closed set. The text box **filters** the seeded zones; it never
+ * creates one, and nothing free-text is ever stored. That distinction is the
+ * whole lesson of the legacy workbook, where free entry produced four spellings
+ * of one destination from one person in five months (LEGACY_AUDIT.md D-04).
+ *
+ * The filter exists because the list is now the full zone set. With corridors
+ * removed there is no natural ordering to shorten it, and 45 chips rendered
+ * twice made the route screen nearly 6,000px tall on a 360px phone — which is
+ * its own kind of friction, and the exact thing this product exists to remove.
  */
 export const ZonePicker = ({
-  value, onChange, lang, exclude, label,
+  value, onChange, lang, exclude, label, recent = [],
 }: {
   value: string | undefined;
   onChange: (id: string) => void;
   lang: Lang;
   exclude?: string | undefined;
   label: string;
+  recent?: readonly string[];
 }) => {
-  // Corridor zones first — they cover the overwhelming majority of journeys.
-  const ordered = [...ZONES].sort((a, b) => b.corridorIds.length - a.corridorIds.length);
+  const [filter, setFilter] = useState("");
+  const inputId = `zone-${label.replace(/\s+/g, "-").toLowerCase()}`;
+
+  const available = ZONES.filter((z) => z.id !== exclude);
+  const needle = filter.trim().toLowerCase();
+
+  // Aliases are searched too, so a colleague typing "Empori" finds Gulshan-2 —
+  // the spelling they already use, resolving to the zone we store.
+  const matches = needle
+    ? available.filter(
+        (z) =>
+          z.nameEn.toLowerCase().includes(needle) ||
+          z.nameBn.includes(filter.trim()) ||
+          z.aliases.some((a) => a.includes(needle)),
+      )
+    : available.filter((z) => recent.includes(z.id) || DEFAULT_ZONES.includes(z.id));
+
+  const selected = value ? ZONES.find((z) => z.id === value) : undefined;
+  const shown = matches.slice(0, VISIBLE_ZONES);
+
   return (
     <div>
-      <span className="label">{label}</span>
-      <div className="chips" role="group" aria-label={label}>
-        {ordered
-          .filter((z) => z.id !== exclude)
-          .map((z) => (
-            <button
-              key={z.id}
-              type="button"
-              className="chip"
-              aria-pressed={value === z.id}
-              onClick={() => onChange(z.id)}
-            >
-              {lang === "en" ? z.nameEn : z.nameBn}
-            </button>
-          ))}
-      </div>
+      <label className="label" htmlFor={inputId}>{label}</label>
+
+      {selected && (
+        <div className="chips" style={{ marginBottom: 10 }}>
+          <button
+            type="button"
+            className="chip"
+            aria-pressed={true}
+            onClick={() => onChange("")}
+            aria-label={`${label}: ${selected.nameEn}, tap to change`}
+          >
+            {lang === "en" ? selected.nameEn : selected.nameBn} ✕
+          </button>
+        </div>
+      )}
+
+      {!selected && (
+        <>
+          <input
+            id={inputId}
+            className="input"
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={lang === "en" ? "Type to search…" : "খুঁজতে লিখুন…"}
+            autoComplete="off"
+          />
+          <div className="chips" style={{ marginTop: 10 }} role="group" aria-label={label}>
+            {shown.map((z) => (
+              <button
+                key={z.id}
+                type="button"
+                className="chip"
+                aria-pressed={value === z.id}
+                onClick={() => {
+                  onChange(z.id);
+                  setFilter("");
+                }}
+              >
+                {lang === "en" ? z.nameEn : z.nameBn}
+              </button>
+            ))}
+            {shown.length === 0 && (
+              <span className="hint">
+                {lang === "en" ? "No place by that name." : "এই নামে কোনো জায়গা নেই।"}
+              </span>
+            )}
+          </div>
+          {matches.length > shown.length && (
+            <p className="hint">
+              {lang === "en"
+                ? `${matches.length - shown.length} more — keep typing to narrow.`
+                : `আরও ${num(matches.length - shown.length, lang)}টি — লিখতে থাকুন।`}
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 };
+
+/** How many chips to show at once, so the page stays a phone screen tall. */
+const VISIBLE_ZONES = 10;
+
+/**
+ * Shown before the colleague types anything.
+ *
+ * Not a corridor list — routing never touches this. It is only a starting set
+ * for the picker, drawn from the office locations and the busiest residential
+ * areas in the legacy data.
+ */
+const DEFAULT_ZONES: readonly string[] = [
+  "gulshan-2", "gulshan-1", "uttara", "banani", "mirpur-10",
+  "dhanmondi", "mohakhali", "khilkhet", "bashundhara", "mohammadpur",
+];
 
 export const Stepper = ({
   value, min, max, onChange, ariaLabel,

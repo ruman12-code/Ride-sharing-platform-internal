@@ -98,9 +98,22 @@ export const OfferFlow = ({
     const kept = (effectiveVia.length + 2) / (suggested.length + 2);
     return Math.max(1, Math.round(route.distanceKm * kept * 10) / 10);
   }, [route, viaTouched, suggested.length, effectiveVia.length]);
-  const breakdown = useMemo(() => shareFor(distanceKm, seats), [distanceKm, seats]);
-  const working = useMemo(() => explain(distanceKm, seats), [distanceKm, seats]);
-  const cap = breakdown.sharePerSeat;
+  // Guarded on distance.
+  //
+  // The pricing domain rejects a non-positive distance rather than quietly
+  // producing a nonsense cost share, which is correct. But the route resolves
+  // asynchronously, so for the first render after picking two zones there is no
+  // distance yet — and calling straight through threw, white-screening the whole
+  // offer flow. The domain was right; the caller was wrong to ask.
+  const breakdown = useMemo(
+    () => (distanceKm > 0 ? shareFor(distanceKm, seats) : undefined),
+    [distanceKm, seats],
+  );
+  const working = useMemo(
+    () => (distanceKm > 0 ? explain(distanceKm, seats) : undefined),
+    [distanceKm, seats],
+  );
+  const cap = breakdown?.sharePerSeat ?? 0;
   const chosenShare = share ?? cap;
 
   const applySaved = (r: SavedRoute) => {
@@ -112,6 +125,7 @@ export const OfferFlow = ({
   };
 
   const publish = () => {
+    if (!breakdown || !origin || !destination) return;
     const departureAt = `2026-09-04T${time}:00+06:00`;
     const check = validatePublish(
       { departureAt, costSharePerSeat: chosenShare, seatsTotal: seats },
@@ -126,7 +140,7 @@ export const OfferFlow = ({
     const ride: Ride = {
       id: `r-${Date.now()}`,
       driverId: ME.id,
-      zoneSequence: [origin!, ...effectiveVia, destination!],
+      zoneSequence: [origin, ...effectiveVia, destination],
       departureAt,
       seatsTotal: seats,
       seatsAvailable: seats,
@@ -134,7 +148,7 @@ export const OfferFlow = ({
       fuelPriceId: ACTIVE_FUEL_PRICE.id,
       fuelRatePerKm: breakdown.fuelRatePerKm,
       distanceKm,
-      pickupPoints: [origin!, ...effectiveVia].map((zid) => ({
+      pickupPoints: [origin, ...effectiveVia].map((zid) => ({
         zoneId: zid,
         label: `${zoneName(zid, "en")} main road`,
         walkingMinutes: 4,
@@ -308,7 +322,13 @@ export const OfferFlow = ({
         </>
       )}
 
-      {step === 3 && (
+      {step === 3 && !working && (
+        <div className="card">
+          <p className="notice warn" style={{ margin: 0 }}>{t("noRoute", lang)}</p>
+        </div>
+      )}
+
+      {step === 3 && working && breakdown && (
         <>
           <div className="card">
             {/* The working is always shown. A number nobody can explain is a
