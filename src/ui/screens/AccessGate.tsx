@@ -7,17 +7,18 @@ import { Wordmark } from "../components/Wordmark.jsx";
 /**
  * The door.
  *
- * A colleague registers themselves with a **personal** address and a password,
- * an administrator who recognises them approves, and they sign in. No codes to
- * hand out and nothing to relay.
+ * A colleague registers themselves with a **personal** address, an
+ * administrator who recognises them approves, and from then on they sign in by
+ * tapping a link emailed to that address. There is no password anywhere: none
+ * to invent, none to forget, and so no reset to build.
  *
  * Work addresses are refused with the reason, because reaching for your work
  * address is the natural thing to do and a colleague deserves to know why it is
  * the wrong one here rather than being told "invalid".
  *
- * Both failure paths say as little as possible otherwise. A form that
- * distinguishes "no such account" from "wrong password" is a way of finding out
- * who has signed up.
+ * Otherwise both paths say as little as possible. Asking for a link gets the
+ * same reply whether or not the address has an account — anything sharper turns
+ * this box into a way of finding out who works here.
  */
 export const AccessGate = ({
   lang, onSignedIn,
@@ -27,7 +28,6 @@ export const AccessGate = ({
 }) => {
   const [mode, setMode] = useState<"sign-in" | "register">("sign-in");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [officialName, setOfficialName] = useState("");
   const [department, setDepartment] = useState("");
@@ -35,6 +35,46 @@ export const AccessGate = ({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | undefined>();
   const [blocked, setBlocked] = useState<readonly string[]>([]);
+
+  /*
+    Arriving from the emailed link.
+
+    The token is redeemed with a POST rather than by the GET that opened this
+    page, because mail scanners and link previewers follow GETs and would burn
+    the link before the colleague ever taps it. They do not run JavaScript, so
+    doing the redemption here is what keeps the link alive for its owner.
+
+    The token is then scrubbed from the address bar. It is spent either way,
+    but a sign-in URL sitting in browser history and in the phone's share sheet
+    is worth one line to avoid.
+  */
+  const [arriving, setArriving] = useState(
+    () => typeof location !== "undefined" && location.pathname === "/enter",
+  );
+
+  useEffect(() => {
+    if (!arriving) return;
+    const token = new URLSearchParams(location.search).get("t") ?? "";
+    void fetch("/api/session-from-link", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    })
+      .then((res) => {
+        history.replaceState(null, "", "/");
+        if (res.ok) {
+          onSignedIn();
+          return;
+        }
+        setArriving(false);
+        setMessage({ ok: false, text: t("linkDead", lang) });
+      })
+      .catch(() => {
+        history.replaceState(null, "", "/");
+        setArriving(false);
+        setMessage({ ok: false, text: t("linkDead", lang) });
+      });
+  }, [arriving, lang, onSignedIn]);
 
   useEffect(() => {
     void fetch("/api/config")
@@ -57,7 +97,6 @@ export const AccessGate = ({
       if (mode === "register") {
         const res = await post("/api/register", {
           email,
-          password,
           displayName: name,
           officialName,
           department,
@@ -66,13 +105,10 @@ export const AccessGate = ({
         setMessage({ ok: b.ok, text: b.message });
         if (b.ok) setMode("sign-in");
       } else {
-        const res = await post("/api/login", { email, password });
-        if (res.ok) {
-          onSignedIn();
-          return;
-        }
-        const b = (await res.json()) as { error: string };
-        setMessage({ ok: false, text: b.error });
+        const res = await post("/api/sign-in-link", { email });
+        const b = (await res.json()) as { ok: boolean; message: string };
+        // Deliberately the same reply either way, so this is always "ok".
+        setMessage({ ok: true, text: b.message });
       }
     } catch {
       setMessage({
@@ -85,9 +121,20 @@ export const AccessGate = ({
   };
 
   const canSubmit =
-    email.trim().length > 3 &&
-    password.length >= (mode === "register" ? 8 : 1) &&
-    (mode === "sign-in" || name.trim().length > 0);
+    email.trim().length > 3 && (mode === "sign-in" || name.trim().length > 0);
+
+  if (arriving) {
+    return (
+      <div className="main" style={{ paddingTop: 32 }}>
+        <div style={{ marginBottom: 20 }}>
+          <Wordmark lang={lang} size="hero" />
+        </div>
+        <div className="card raised">
+          <p style={{ margin: 0 }}>{t("signingYouIn", lang)}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="main" style={{ paddingTop: 32 }}>
@@ -130,18 +177,7 @@ export const AccessGate = ({
           </p>
         )}
 
-        <label className="label" htmlFor="password" style={{ marginTop: 16 }}>
-          {t("password", lang)}
-        </label>
-        <input
-          id="password"
-          className="input"
-          type="password"
-          autoComplete={mode === "register" ? "new-password" : "current-password"}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        {mode === "register" && <p className="hint">{t("passwordHint", lang)}</p>}
+        {mode === "sign-in" && <p className="hint">{t("signInLinkHint", lang)}</p>}
 
         {mode === "register" && (
           <>
@@ -207,7 +243,9 @@ export const AccessGate = ({
           disabled={!canSubmit || busy}
           onClick={() => void submit()}
         >
-          {busy ? "…" : t(mode === "register" ? "register" : "signIn", lang)}
+          {busy
+            ? t(mode === "register" ? "register" : "sendingLink", lang)
+            : t(mode === "register" ? "register" : "sendLink", lang)}
         </button>
 
         <button

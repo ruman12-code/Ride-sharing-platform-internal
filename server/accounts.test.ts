@@ -4,14 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "./db.js";
 import { Access } from "./access.js";
-import {
-  Accounts,
-  LOCKOUT_MINUTES,
-  MAX_SIGNIN_ATTEMPTS,
-  MIN_PASSWORD_LENGTH,
-  isWorkAddress,
-  parseBlockedDomains,
-} from "./accounts.js";
+import { MagicLinks } from "./magic-link.js";
+import { Accounts, isWorkAddress, parseBlockedDomains } from "./accounts.js";
 
 let dir: string;
 let db: Db;
@@ -29,7 +23,6 @@ afterEach(() => {
 
 const good = {
   email: "nusrat.personal@gmail.com",
-  password: "a-good-passphrase",
   displayName: "Nusrat",
 };
 
@@ -77,12 +70,6 @@ describe("registering", () => {
     expect(accounts.pending()[0]).toMatchObject({ officialName: null, department: null });
   });
 
-  it("refuses a short password", () => {
-    const r = accounts.register({ ...good, password: "short" });
-    expect(r.ok).toBe(false);
-    expect(r.message).toContain(String(MIN_PASSWORD_LENGTH));
-  });
-
   it("refuses a malformed address or a missing name", () => {
     expect(accounts.register({ ...good, email: "not-an-email" }).ok).toBe(false);
     expect(accounts.register({ ...good, displayName: "  " }).ok).toBe(false);
@@ -95,80 +82,27 @@ describe("registering", () => {
     expect(accounts.pending()).toHaveLength(1);
   });
 
-  it("never stores the password itself", () => {
+  it("stores no credential at all", () => {
+    // There is nothing to hash any more. Whatever admits somebody lives in
+    // login_links, hashed there, and expires in twenty minutes.
     accounts.register(good);
-    const row = db.get<{ passwordHash: string }>("SELECT passwordHash FROM users")!;
-    expect(row.passwordHash).not.toContain(good.password);
-    expect(row.passwordHash).toHaveLength(64);
-  });
-
-  it("salts each password separately, so identical ones hash differently", () => {
-    accounts.register(good);
-    accounts.register({ ...good, email: "other@gmail.com" });
-    const rows = db.all<{ passwordHash: string }>("SELECT passwordHash FROM users");
-    expect(rows[0]!.passwordHash).not.toBe(rows[1]!.passwordHash);
-  });
-});
-
-describe("signing in", () => {
-  const approve = () => {
-    accounts.register(good);
-    const id = accounts.pending()[0]!.id;
-    db.run("UPDATE users SET status = 'approved' WHERE id = ?", id);
-    return id;
-  };
-
-  it("admits an approved colleague", () => {
-    const id = approve();
-    expect(accounts.signIn(good.email, good.password)).toEqual({ userId: id });
-  });
-
-  it("is case-insensitive on the address", () => {
-    const id = approve();
-    expect(accounts.signIn("Nusrat.Personal@Gmail.com", good.password)).toEqual({ userId: id });
-  });
-
-  it("tells somebody still pending that they are waiting, not that they are wrong", () => {
-    accounts.register(good);
-    const r = accounts.signIn(good.email, good.password);
-    expect("error" in r && r.error).toContain("waiting for approval");
-  });
-
-  it("refuses a suspended account", () => {
-    const id = approve();
-    db.run("UPDATE users SET isSuspended = 1 WHERE id = ?", id);
-    expect("error" in accounts.signIn(good.email, good.password)).toBe(true);
-  });
-
-  it("gives the same answer for a wrong password and an unknown address", () => {
-    approve();
-    const wrongPassword = accounts.signIn(good.email, "not-the-password");
-    const unknown = accounts.signIn("nobody@gmail.com", "anything-at-all");
-    // Otherwise sign-in becomes a way of discovering who is registered.
-    expect(wrongPassword).toEqual(unknown);
-  });
-
-  it("refuses an account that has no password set", () => {
-    // Invite-mode rows have none; a password sign-in must not admit them.
-    db.run(
-      "INSERT INTO users (id, displayName, email, status, createdAt) VALUES ('u1','X','x@gmail.com','approved','now')",
-    );
-    expect("error" in accounts.signIn("x@gmail.com", "")).toBe(true);
+    const row = db.get<{ passwordHash: string | null; passwordSalt: string | null }>(
+      "SELECT passwordHash, passwordSalt FROM users",
+    )!;
+    expect(row).toEqual({ passwordHash: null, passwordSalt: null });
   });
 });
 
 
 describe("the administrator", () => {
   it("registers like everybody else and is approved immediately", () => {
-    // An admin row seeded without a password cannot sign in through a password
-    // form — which is exactly the lockout an earlier version shipped.
+    // Seeding an admin row instead is how an earlier version locked the
+    // administrator out of their own pilot.
     const r = accounts.register({ ...good, email: "ruman@personal.com" });
     expect(r.ok).toBe(true);
     expect(r.message).toContain("administrator");
     expect(accounts.pending()).toHaveLength(0);
 
-    const signedIn = accounts.signIn("ruman@personal.com", good.password);
-    expect("userId" in signedIn).toBe(true);
     const row = db.get<{ role: string; status: string }>(
       "SELECT role, status FROM users WHERE email = 'ruman@personal.com'",
     )!;
@@ -192,102 +126,16 @@ describe("the administrator", () => {
 });
 
 describe("approving somebody who registered themselves", () => {
-  it("mints no code, because they already chose a password", () => {
+  it("mints no code, because a link can reach the address they gave", () => {
     accounts.register(good);
     const id = accounts.pending()[0]!.id;
 
-    const access = new Access(db, {
-      mode: "domain",
-      allowedDomains: [],
-      autoApproveDomains: [],
-      canSendEmail: false,
-      ipPepper: "p",
-    });
-    const issued = access.approve(id, "admin");
+    const issued = new Access(db).approve(id, "admin");
 
-    expect(issued).toEqual({ kind: "password" });
+    expect(issued).toEqual({ kind: "link" });
     expect(db.all("SELECT id FROM invite_codes WHERE userId = ?", id)).toHaveLength(0);
-    // And the password they chose now works.
-    expect("userId" in accounts.signIn(good.email, good.password)).toBe(true);
+    // And a sign-in link can now be minted for them.
+    expect(new MagicLinks(db).request(good.email)).toBeDefined();
   });
 });
 
-
-describe("guessing a password", () => {
-  // The counter is process-wide, so each test starts from a known state.
-  beforeEach(() => Accounts.resetAttempts());
-
-  const approve = () => {
-    accounts.register(good);
-    db.run("UPDATE users SET status = 'approved' WHERE email = ?", good.email);
-  };
-
-  it("stops answering after too many wrong passwords", () => {
-    approve();
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) {
-      expect(accounts.signIn(good.email, `wrong-${i}`)).toEqual({
-        error: "That email and password do not match.",
-      });
-    }
-    const blocked = accounts.signIn(good.email, "wrong-again");
-    expect("error" in blocked && blocked.error).toMatch(/Too many sign-in attempts/);
-  });
-
-  it("refuses the RIGHT password too, once locked", () => {
-    // Otherwise the lock is decorative: a script that happens to guess
-    // correctly on the last attempt would still be let in.
-    approve();
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn(good.email, `wrong-${i}`);
-    const out = accounts.signIn(good.email, good.password);
-    expect("userId" in out).toBe(false);
-  });
-
-  it("says how long is left, rather than just refusing", () => {
-    approve();
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn(good.email, `wrong-${i}`);
-    const out = accounts.signIn(good.email, "x");
-    expect("error" in out && out.error).toMatch(/[0-9]+ minutes?/);
-  });
-
-  it("lets them back in once the window passes", () => {
-    approve();
-    const start = new Date("2026-09-04T09:00:00Z");
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn(good.email, `wrong-${i}`, start);
-    const later = new Date(start.getTime() + (LOCKOUT_MINUTES + 1) * 60_000);
-    expect("userId" in accounts.signIn(good.email, good.password, later)).toBe(true);
-  });
-
-  it("forgets a stale window, so one slip a month never adds up", () => {
-    approve();
-    let when = new Date("2026-01-01T09:00:00Z");
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS * 3; i++) {
-      accounts.signIn(good.email, "wrong", when);
-      when = new Date(when.getTime() + (LOCKOUT_MINUTES + 1) * 60_000);
-    }
-    expect("userId" in accounts.signIn(good.email, good.password, when)).toBe(true);
-  });
-
-  it("clears the count when they finally remember", () => {
-    approve();
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS - 1; i++) accounts.signIn(good.email, "wrong");
-    expect("userId" in accounts.signIn(good.email, good.password)).toBe(true);
-    // The near-miss run is spent, not carried forward.
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS - 1; i++) accounts.signIn(good.email, "wrong");
-    expect("userId" in accounts.signIn(good.email, good.password)).toBe(true);
-  });
-
-  it("locks one account without locking everybody else out", () => {
-    approve();
-    accounts.register({ ...good, email: "tanvir@personal.com" });
-    db.run("UPDATE users SET status = 'approved' WHERE email = 'tanvir@personal.com'");
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn(good.email, "wrong");
-    expect("userId" in accounts.signIn("tanvir@personal.com", good.password)).toBe(true);
-  });
-
-  it("counts attempts on an address that has no account at all", () => {
-    // Otherwise the throttle is trivially avoided by guessing addresses too.
-    for (let i = 0; i < MAX_SIGNIN_ATTEMPTS; i++) accounts.signIn("nobody@personal.com", "wrong");
-    const out = accounts.signIn("nobody@personal.com", "wrong");
-    expect("error" in out && out.error).toMatch(/Too many sign-in attempts/);
-  });
-});

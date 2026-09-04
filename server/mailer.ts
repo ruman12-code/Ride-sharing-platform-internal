@@ -13,6 +13,13 @@ import { createTransport, type Transporter } from "nodemailer";
  * cannot be automatic, because nothing has proved the address belongs to the
  * person asking.
  */
+export interface MailBody {
+  readonly subject: string;
+  readonly text: string;
+  /** Optional HTML alternative, so a link is a real tap target. */
+  readonly html?: string;
+}
+
 export interface Mailer {
   /** True when SMTP settings are present. Says nothing about whether they work. */
   readonly enabled: boolean;
@@ -26,7 +33,7 @@ export interface Mailer {
    * approved. Better to find out at boot than to find out from the colleague.
    */
   verify(): Promise<{ ok: boolean; error?: string }>;
-  send(to: string, subject: string, text: string): Promise<boolean>;
+  send(to: string, subject: string, text: string, html?: string): Promise<boolean>;
 }
 
 export const createMailer = (): Mailer => {
@@ -68,9 +75,9 @@ export const createMailer = (): Mailer => {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
       }
     },
-    async send(to, subject, text) {
+    async send(to, subject, text, html) {
       try {
-        await transport.sendMail({ from, to, subject, text });
+        await transport.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
         return true;
       } catch (e) {
         // Logged, never surfaced. A failure here must not tell the person at
@@ -104,4 +111,49 @@ export const accessCodeEmail = (code: string, appUrl: string): { subject: string
     "Ekpothe is a voluntary tool built by a colleague. It is not an official",
     "system, and taking part is entirely your choice.",
   ].join("\n"),
+});
+
+/**
+ * The sign-in link.
+ *
+ * Short on purpose. It is read on a phone, usually while walking, and the only
+ * thing that matters is the link. The two facts underneath it — once, twenty
+ * minutes — are there so that a colleague who taps an old one understands what
+ * happened rather than concluding the app is broken.
+ *
+ * The last line matters more than it looks: an unexpected sign-in mail is
+ * exactly what a person should be able to ignore safely, and saying so is what
+ * stops somebody tapping a link they did not ask for.
+ */
+export const signInLinkEmail = (url: string): MailBody => ({
+  subject: "Your Ekpothe sign-in link",
+  text: [
+    "Tap to sign in to Ekpothe:",
+    "",
+    url,
+    "",
+    "This link works once and expires in 20 minutes.",
+    "If you didn't ask for it, you can ignore this — nobody can get in without it.",
+    "",
+    "— Ekpothe",
+  ].join("\n"),
+  /*
+    An HTML alternative as well as the text.
+
+    Not decoration: it makes the link a real anchor, so the tap target does not
+    depend on the client guessing where a URL starts and ends in wrapped plain
+    text. Deliberately plain — inline styles only, no images, no external CSS —
+    because that is what survives a mail client, and because a sign-in mail that
+    looks like marketing is a sign-in mail people distrust.
+  */
+  html: [
+    '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:16px;line-height:1.6;color:#12211b">',
+    "<p>Tap to sign in to Ekpothe:</p>",
+    `<p><a href="${url}" style="display:inline-block;background:#14503a;color:#fff;`,
+    'text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Sign in to Ekpothe</a></p>',
+    '<p style="color:#566259;font-size:14px">This link works once and expires in 20 minutes.<br>',
+    "If you didn't ask for it, you can ignore this — nobody can get in without it.</p>",
+    '<p style="color:#7c877f;font-size:13px">— Ekpothe</p>',
+    "</div>",
+  ].join(""),
 });

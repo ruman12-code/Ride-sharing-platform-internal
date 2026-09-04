@@ -16,6 +16,14 @@ import type { Id } from "../src/domain/types.js";
  * are recomputed from bookings on the server and never taken from the request.
  */
 
+/**
+ * Ninety days, matching the cookie the server sets. Kept here as well as in
+ * `index.ts` because the row and the cookie must expire together: a cookie that
+ * outlives its row logs somebody out with no explanation, and a row that
+ * outlives its cookie leaves a usable session nobody can reach.
+ */
+export const SESSION_MS = 90 * 24 * 3_600_000;
+
 export interface Session {
   readonly userId: string;
   readonly displayName: string;
@@ -68,7 +76,7 @@ export class Api {
       token,
       userId,
       new Date(now).toISOString(),
-      new Date(now + 30 * 24 * 3600_000).toISOString(),
+      new Date(now + SESSION_MS).toISOString(),
     );
     return token;
   }
@@ -79,7 +87,30 @@ export class Api {
       "SELECT userId, expiresAt FROM sessions WHERE token = ?",
       token,
     );
-    if (!row || row.expiresAt < new Date().toISOString()) return undefined;
+    const now = new Date();
+    if (!row || row.expiresAt < now.toISOString()) return undefined;
+
+    /*
+      Roll the session forward.
+
+      Without this, ninety days after signing in a colleague is thrown out
+      mid-pilot for no reason they can see. With it, the clock restarts on every
+      visit: somebody using the app is never asked again, and only an account
+      untouched for ninety days has to ask for a fresh link.
+
+      Written at most once a day rather than on every request — the point is to
+      keep an active session alive, and a database write per API call to
+      achieve that would be a poor trade.
+    */
+    const expiry = new Date(row.expiresAt);
+    const full = SESSION_MS;
+    if (expiry.getTime() - now.getTime() < full - 24 * 3_600_000) {
+      this.db.run(
+        "UPDATE sessions SET expiresAt = ? WHERE token = ?",
+        new Date(now.getTime() + full).toISOString(),
+        token,
+      );
+    }
     const user = this.db.get<User & { status: string }>(
       "SELECT * FROM users WHERE id = ?",
       row.userId,

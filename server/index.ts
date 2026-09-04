@@ -1,13 +1,13 @@
-import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { readFileSync, existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { Db } from "./db.js";
-import { Api, type Session } from "./api.js";
-import { Access, parseAllowedDomains } from "./access.js";
-import { accessCodeEmail, createMailer } from "./mailer.js";
+import { Api, SESSION_MS, type Session } from "./api.js";
+import { Access } from "./access.js";
+import { signInLinkEmail, createMailer } from "./mailer.js";
 import { Accounts, parseBlockedDomains } from "./accounts.js";
+import { MagicLinks } from "./magic-link.js";
 import { Notifier, notifications } from "./notify.js";
 
 /**
@@ -80,48 +80,23 @@ const SECURE = OWN_TLS || TRUST_PROXY;
   }
 }
 
-const ACCESS_MODE = process.env["ACCESS_MODE"] === "domain" ? "domain" : "invite";
-const ALLOWED_DOMAINS = parseAllowedDomains(process.env["ALLOWED_EMAIL_DOMAINS"]);
 
-if (ACCESS_MODE === "domain" && ALLOWED_DOMAINS.length === 0) {
-  console.error(
-    "ACCESS_MODE=domain needs ALLOWED_EMAIL_DOMAINS.\n" +
-      "Refusing to start: without it nothing stops any address requesting access.\n" +
-      "  ALLOWED_EMAIL_DOMAINS='yourcompany.org' node dist-server/server/index.js",
-  );
-  process.exit(1);
-}
-
-/**
- * Domains approved without an administrator.
- *
- * Only honoured when SMTP is configured, because the code has to reach the
- * address for the domain to prove anything. Defaults to the allowed domains,
- * so configuring email is all it takes to make joining self-service.
- */
-const AUTO_APPROVE_DOMAINS = parseAllowedDomains(
-  process.env["AUTO_APPROVE_DOMAINS"] ?? process.env["ALLOWED_EMAIL_DOMAINS"],
-);
-
-/** Public address of the app, used in the email that carries the code. */
+/** Public address of the app. It is what the sign-in link points at. */
 const APP_URL = process.env["APP_URL"] ?? `http://localhost:${PORT}`;
 
 /**
  * The first administrator.
  *
- * In domain mode this is their work address. In invite mode it is only an
- * identifier for the seeded admin row — nothing is ever sent to it — so a
- * placeholder is used when none is given, and no employer address need be
- * stored at all.
+ * Their own personal address. Registering with it is approved immediately and
+ * as an admin, and sign-in links are sent to it like anybody else's — so there
+ * is no seeded row, and no account that exists without a way to reach it.
  */
-const ADMIN_EMAIL =
-  (process.env["ADMIN_EMAIL"] ?? "").trim().toLowerCase() ||
-  (ACCESS_MODE === "invite" ? "invite:admin" : "");
+const ADMIN_EMAIL = (process.env["ADMIN_EMAIL"] ?? "").trim().toLowerCase();
 if (!ADMIN_EMAIL) {
   console.error(
     "ADMIN_EMAIL is not set.\n" +
-      "Refusing to start: somebody has to be able to approve the first request.\n" +
-      "  ADMIN_EMAIL='you@yourcompany.org' node dist-server/server/index.js",
+      "Refusing to start: somebody has to be able to approve the first colleague.\n" +
+      "  ADMIN_EMAIL='you@gmail.com' node dist-server/server/index.js",
   );
   process.exit(1);
 }
@@ -146,6 +121,7 @@ const VAPID_PRIVATE = process.env["VAPID_PRIVATE_KEY"];
 
 const mailer = createMailer();
 const accounts = new Accounts(db, BLOCKED_DOMAINS, ADMIN_EMAIL);
+const magicLinks = new MagicLinks(db);
 const notifier = new Notifier(
   db,
   mailer,
@@ -158,15 +134,7 @@ const notifier = new Notifier(
     : undefined,
   APP_URL,
 );
-const access = new Access(db, {
-  mode: ACCESS_MODE,
-  allowedDomains: ALLOWED_DOMAINS,
-  autoApproveDomains: AUTO_APPROVE_DOMAINS,
-  canSendEmail: mailer.enabled,
-  // Salts the hashed addresses used for rate limiting. Regenerated on restart:
-  // the counter is a rate limit, not a log, so losing it is correct.
-  ipPepper: randomUUID(),
-});
+const access = new Access(db);
 
 /**
  * There is no seeded administrator row.
@@ -216,6 +184,22 @@ const body = async (req: NodeJS.ReadableStream): Promise<Record<string, unknown>
  * is always HTTPS, and then serving it over HTTP in development, locks the
  * developer out of their own machine.
  */
+/**
+ * How long a session lasts, and how it renews.
+ *
+ * Ninety days, rolling: every visit pushes the expiry out again. The effect is
+ * that a colleague who uses the app signs in once and is never asked twice,
+ * while somebody who has not opened it since the pilot began is asked for a
+ * fresh link — which is exactly the right way round.
+ *
+ * It also bounds the cost of a lost phone: an unused session dies on its own.
+ */
+export const SESSION_DAYS = SESSION_MS / (24 * 3_600_000);
+
+const sessionCookie = (token: string): string =>
+  `cp=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 24 * 3600}` +
+  (SECURE ? "; Secure" : "");
+
 const securityHeaders = (): Record<string, string> => ({
   "x-content-type-options": "nosniff",
   "referrer-policy": "same-origin",
@@ -248,7 +232,6 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           const email = String(b["email"] ?? "").trim().toLowerCase();
           const result = accounts.register({
             email,
-            password: String(b["password"] ?? ""),
             displayName: String(b["displayName"] ?? ""),
             ...(b["officialName"] ? { officialName: String(b["officialName"]) } : {}),
             ...(b["department"] ? { department: String(b["department"]) } : {}),
@@ -275,68 +258,74 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           return send(200, result);
         }
 
-        if (url.pathname === "/api/login" && req.method === "POST") {
+        /*
+          Ask for a sign-in link.
+
+          The reply is identical whether a link was sent, the address has no
+          account, the account is still waiting for approval, or somebody has
+          asked five times in an hour. Saying anything more precise would turn
+          this box into a way of finding out who works here.
+        */
+        if (url.pathname === "/api/sign-in-link" && req.method === "POST") {
           const b = await body(req);
-          const out = accounts.signIn(String(b["email"] ?? ""), String(b["password"] ?? ""));
-          if ("error" in out) return send(401, { error: out.error });
-          const token = api.createSession(out.userId);
-          res.setHeader(
-            "set-cookie",
-            `cp=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 3600}` +
-              (SECURE ? "; Secure" : ""),
-          );
+          const asked = String(b["email"] ?? "");
+          const same = {
+            ok: true,
+            message:
+              "If that address has an approved account, a sign-in link is on its way. " +
+              "It works once and lasts 20 minutes.",
+          };
+
+          const minted = magicLinks.request(asked);
+          if (minted) {
+            const mail = signInLinkEmail(`${APP_URL}/enter?t=${encodeURIComponent(minted.token)}`);
+            // Not awaited into the reply: a slow relay must not make the form
+            // look broken, and the answer is the same either way.
+            void mailer.send(minted.email, mail.subject, mail.text, mail.html).catch(() => {});
+          }
+          return send(200, same);
+        }
+
+        /*
+          Redeem one. A POST on purpose.
+
+          Mail scanners and link previewers follow GETs, and a link consumed by
+          a scanner before the colleague taps it is a colleague who cannot get
+          in. They do not run JavaScript, so redemption happening in a POST the
+          page makes on arrival is what keeps the link alive for its owner.
+        */
+        if (url.pathname === "/api/session-from-link" && req.method === "POST") {
+          const b = await body(req);
+          const userId = magicLinks.redeem(String(b["token"] ?? ""));
+          if (!userId) {
+            return send(401, {
+              error:
+                "That link has expired or has already been used. " +
+                "Ask for a new one — it takes a moment.",
+            });
+          }
+          const token = api.createSession(userId);
+          res.setHeader("set-cookie", sessionCookie(token));
           return send(200, api.sessionFor(token));
         }
 
-        // Told to the sign-in screen so it knows which form to show, and so the
-        // browser can subscribe to push. The public key is public by design.
+        // Told to the sign-in screen so the browser can subscribe to push. The
+        // public key is public by design.
         if (url.pathname === "/api/config") {
           return send(200, {
-            mode: ACCESS_MODE,
             selfRegister: true,
             pushKey: VAPID_PUBLIC ?? null,
             blockedDomains: BLOCKED_DOMAINS,
           });
         }
 
-        if (url.pathname === "/api/request-access" && req.method === "POST") {
-          if (ACCESS_MODE === "invite") {
-            return send(200, {
-              ok: false,
-              inviteOnly: true,
-              message:
-                "Ekpothe is invite-only during the pilot. Ask the colleague who " +
-                "shared it with you for a code.",
-            });
-          }
-          const b = await body(req);
-          const ip =
-            (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
-            req.socket.remoteAddress ??
-            "unknown";
-          const email = String(b["email"] ?? "");
-          const outcome = access.request(email, String(b["displayName"] ?? ""), ip);
-
-          // The code goes to the mailbox, never back to the browser. Returning
-          // it here would defeat the point of emailing it: the whole reason
-          // this is safe is that only the mailbox owner can read it.
-          if (outcome.code) {
-            const mail = accessCodeEmail(outcome.code, APP_URL);
-            await mailer.send(email, mail.subject, mail.text);
-          }
-          const { code: _code, userId: _userId, ...safe } = outcome;
-          return send(200, safe);
-        }
-
         if (url.pathname === "/api/sign-in" && req.method === "POST") {
           const b = await body(req);
           const code = String(b["code"] ?? "");
-          // In invite mode the code alone identifies the person: it was minted
-          // for exactly one of them, so no address is needed or wanted.
-          const userId =
-            ACCESS_MODE === "invite"
-              ? access.redeemByCode(code, String(b["displayName"] ?? ""))
-              : access.redeem(String(b["email"] ?? ""), code);
+          // The code alone identifies the person: it was minted for exactly one
+          // of them, so no address is needed or wanted — which is the point,
+          // since an invited colleague may not have a usable one.
+          const userId = access.redeemByCode(code, String(b["displayName"] ?? ""));
           // One message for every failure. Distinguishing "not approved" from
           // "wrong code" would turn this into a way of finding out who works here.
           if (!userId) {
@@ -345,11 +334,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             });
           }
           const token = api.createSession(userId);
-          res.setHeader(
-            "set-cookie",
-            `cp=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${30 * 24 * 3600}` +
-              (SECURE ? "; Secure" : ""),
-          );
+          res.setHeader("set-cookie", sessionCookie(token));
           return send(200, api.sessionFor(token));
         }
 
@@ -500,7 +485,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             // Approval nobody is told about is indistinguishable from being
             // refused. They have never signed in, so this reaches them by
             // email — the reason a personal address is asked for at all.
-            if (issued.kind === "password") {
+            if (issued.kind === "link") {
               void notifier.send(notifications.registrationApproved(userId)).catch(() => {});
             }
             return send(200, issued);

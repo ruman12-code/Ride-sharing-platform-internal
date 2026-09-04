@@ -166,6 +166,20 @@ export const STRINGS = {
     en: "Addresses at %s are not accepted.",
     bn: "%s ঠিকানা গ্রহণ করা হয় না।",
   },
+  // Signing in, without a password. See server/magic-link.ts for the why.
+  sendLink: { en: "Email me a sign-in link", bn: "সাইন-ইন লিংক পাঠান" },
+  sendingLink: { en: "Sending…", bn: "পাঠানো হচ্ছে…" },
+  signInLinkHint: {
+    en: "No password. We email you a link — tap it and you're in.",
+    bn: "কোনো পাসওয়ার্ড নেই। আমরা একটি লিংক পাঠাব — সেটিতে ট্যাপ করলেই ঢুকে যাবেন।",
+  },
+  checkYourEmail: { en: "Check your email", bn: "ইমেইল দেখুন" },
+  signingYouIn: { en: "Signing you in…", bn: "সাইন ইন করা হচ্ছে…" },
+  linkDead: {
+    en: "That link has expired or has already been used.",
+    bn: "লিংকটির মেয়াদ শেষ, বা এটি আগেই ব্যবহৃত হয়েছে।",
+  },
+  askForAnother: { en: "Ask for another", bn: "আরেকটি চান" },
   password: { en: "Password", bn: "পাসওয়ার্ড" },
   passwordHint: { en: "At least 8 characters.", bn: "কমপক্ষে ৮টি অক্ষর।" },
   optionalSection: { en: "Optional — helps me recognise you", bn: "ঐচ্ছিক — আপনাকে চিনতে সাহায্য করে" },

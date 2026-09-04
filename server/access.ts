@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from "node:crypto";
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Db } from "./db.js";
 
 /**
@@ -7,69 +7,27 @@ import type { Db } from "./db.js";
  * The pilot is deliberately reachable by anyone — a public URL a colleague can
  * open on their phone without going through IT. What is *not* public is access.
  *
- * Two ways through, depending on whether the server can send email.
+ * A colleague registers themselves, an administrator who recognises them
+ * approves, and from then on they sign in by tapping a link emailed to the
+ * address they gave (`magic-link.ts`). This class is the administrator's half
+ * of that: approving, suspending, and the one remaining code path.
  *
- * **With email (automatic).** The address must be on an allowed work domain,
- * and the code is sent to that address. Receiving it proves the mailbox belongs
- * to whoever asked, so no administrator is needed. This is the important part:
- * on its own, a domain check is a *claim*, not a proof — anyone can type
- * `someone@giz.de`. Sending the code to the address is what makes automatic
- * approval safe rather than merely convenient.
+ * **Invite codes** survive for the colleague a link cannot reach — no usable
+ * personal address, or a shared device. The administrator types a name they
+ * recognise, gets a code, and hands it over however they normally talk to that
+ * person. The row carries an `invite:` placeholder address precisely because
+ * nothing can be sent to it.
  *
- * **Without email (manual).** The request waits for an administrator who
- * recognises the name, and the code is relayed by hand. Slower, and it does not
- * scale past a few dozen people, but it is a person deciding about a person.
- *
- * Either way a code is single-use, bound to one address, and expires — so a
- * forwarded code is worthless.
+ * An earlier version also had a third way in: request access with a work
+ * address on an allowed domain and receive a code by email. It is gone. It did
+ * exactly what a sign-in link does — prove you can read that mailbox — with
+ * more moving parts, it needed a list of allowed employer domains this pilot
+ * deliberately no longer keeps, and no screen in the app ever called it. Three
+ * doors, two of them unused, is how the administrator got locked out of their
+ * own pilot once already.
  */
 
 export type AccessStatus = "pending" | "approved" | "suspended";
-
-export interface AccessRequestResult {
-  readonly ok: boolean;
-  /** Shown to the person who asked. Never says whether an account exists. */
-  readonly message: string;
-  /** True when the address is outside every allowed organisation. */
-  readonly outsideOrganisation?: boolean;
-}
-
-/**
- * The reply to an address outside every allowed organisation.
- *
- * The organisation's own wording. It says this is a scope decision rather than
- * a fault, and leaves a door open — which matters, because the person reading
- * it may well be a partner-organisation colleague who genuinely shares the
- * commute.
- */
-export const NOT_IN_ORGANISATION =
-  "Sorry! You are not in our organisation. " +
-  "Please wait until your organisation is listed, or contact the admin.";
-
-/** Work domains whose addresses may request access. */
-export const parseAllowedDomains = (raw: string | undefined): readonly string[] =>
-  (raw ?? "")
-    .split(",")
-    .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
-    .filter((d) => d.length > 0);
-
-export const emailIsAllowed = (email: string, domains: readonly string[]): boolean => {
-  // Exactly one "@", with something either side.
-  //
-  // An earlier version took everything after the *last* "@", so
-  // "a@@example.org" read as the domain "example.org" and passed. The request
-  // form happens to reject that shape before it gets here, but a gate that is
-  // only correct because of its caller is not a gate.
-  const parts = email.trim().split("@");
-  if (parts.length !== 2) return false;
-  const [local = "", domainPart = ""] = parts;
-  if (local.length === 0 || domainPart.length === 0) return false;
-
-  const domain = domainPart.toLowerCase();
-  // Exact match or a subdomain of an allowed domain. Never a suffix match:
-  // "notexample.org" must not pass because it ends in "example.org".
-  return domains.some((d) => domain === d || domain.endsWith(`.${d}`));
-};
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0, I/1, easy to read aloud
 
@@ -90,100 +48,22 @@ const hashCode = (code: string, salt: string): string =>
   scryptSync(code.trim().toUpperCase(), salt, 32).toString("hex");
 
 export const CODE_VALID_DAYS = 7;
-/** Requests allowed from one address in an hour, before the form stops replying. */
-export const MAX_REQUESTS_PER_HOUR = 5;
-
-/** Addresses are hashed before storage: rate limiting needs no IP history. */
-const hashIp = (ip: string, pepper: string): string =>
-  createHash("sha256").update(`${pepper}:${ip}`).digest("hex");
-
-/**
- * How colleagues get in.
- *
- * `invite`  — the pilot default. No email address is asked for or stored. The
- *             administrator generates codes and hands them to colleagues
- *             directly, and a colleague signs in with a code and a display name
- *             of their choosing.
- *
- * `domain`  — an email address on an allowed work domain, approved either by
- *             the administrator or automatically when the code can be emailed.
- *
- * `invite` exists because collecting employer email addresses is the single
- * thing that most changes this from a colleague's side project into something
- * an employer's data protection office has to have a view on. An address like
- * `nusrat@giz.de` identifies a named person *and* their employer, and ties a
- * record of their daily movements to both.
- *
- * Without it the database holds a display name somebody chose and the journeys
- * they published. That is a much smaller thing to be responsible for, and it is
- * enough to find out whether colleagues will use a carpool at all — which is
- * the only question a pilot needs to answer.
- *
- * It is also the stronger gate. A code handed over in person is better evidence
- * than an unverified claim to own an address at a given domain.
- */
-export type AccessMode = "invite" | "domain";
-
 /**
  * What approving somebody actually produced.
  *
- * `code` — the colleague has no password yet (they were invited), so a
- *          single-use code is minted for them to redeem.
- * `password` — they registered themselves and already chose a password.
- *          Approval is the whole action; issuing a code as well would hand
- *          them a second credential and point them at the wrong door.
+ * `code` — an invited row, which carries a placeholder address nothing can be
+ *          sent to. A single-use code is minted and handed over in person.
+ * `link` — they registered themselves with a real address, so approval is the
+ *          whole action: from here they sign in by tapping an emailed link.
+ *          Minting a code as well would hand them a second credential and
+ *          point them at a door that no longer exists.
  */
 export type ApprovalResult =
   | { readonly kind: "code"; readonly code: string }
-  | { readonly kind: "password" };
-
-export interface AccessOptions {
-  readonly mode: AccessMode;
-  /** Domains that may request access at all. */
-  readonly allowedDomains: readonly string[];
-  /**
-   * Domains approved without an administrator, **when a code can be emailed**.
-   *
-   * Never honoured without a working mailer: automatic approval on an
-   * unverified address would admit anybody who knows the domain.
-   */
-  readonly autoApproveDomains: readonly string[];
-  readonly canSendEmail: boolean;
-  readonly ipPepper: string;
-}
+  | { readonly kind: "link" };
 
 export class Access {
-  private readonly allowedDomains: readonly string[];
-  private readonly autoApproveDomains: readonly string[];
-  private readonly canSendEmail: boolean;
-  private readonly ipPepper: string;
-
-  readonly mode: AccessMode;
-
-  constructor(
-    private readonly db: Db,
-    options: AccessOptions,
-  ) {
-    this.mode = options.mode;
-    this.allowedDomains = options.allowedDomains;
-    this.autoApproveDomains = options.autoApproveDomains;
-    this.canSendEmail = options.canSendEmail;
-    this.ipPepper = options.ipPepper;
-  }
-
-  /**
-   * May this address skip the administrator?
-   *
-   * Only when a code can actually be emailed to it. Without that, the address
-   * is unverified and the domain proves nothing.
-   */
-  autoApproves(email: string): boolean {
-    return (
-      this.mode === "domain" &&
-      this.canSendEmail &&
-      emailIsAllowed(email, this.autoApproveDomains)
-    );
-  }
+  constructor(private readonly db: Db) {}
 
   /**
    * Mint a code for somebody the administrator is about to invite.
@@ -251,100 +131,6 @@ export class Access {
    * named somebody already approved. Anything else turns this form into a way
    * of discovering who works here.
    */
-  request(
-    email: string,
-    displayName: string,
-    ip: string,
-  ): AccessRequestResult & { readonly userId?: string; readonly code?: string } {
-    const normalised = email.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalised)) {
-      return { ok: false, message: "That doesn't look like an email address." };
-    }
-
-    // Refused with the organisation's own wording, so a colleague from a
-    // partner organisation understands this is a scope decision rather than a
-    // fault, and knows what to do about it.
-    if (!emailIsAllowed(normalised, this.allowedDomains)) {
-      return { ok: false, message: NOT_IN_ORGANISATION, outsideOrganisation: true };
-    }
-
-    const same: AccessRequestResult = {
-      ok: true,
-      message:
-        "Thanks — your request has gone to the administrator. " +
-        "You'll be sent a code once it's approved.",
-    };
-
-    if (this.tooManyRecently(ip)) return same;
-    this.recordAttempt(ip);
-
-    const existing = this.db.get<{ id: string; status: string }>(
-      "SELECT id, status FROM users WHERE email = ?",
-      normalised,
-    );
-
-    // Somebody already approved asking again is not an error: they have lost
-    // their code. Issue a fresh one, which invalidates the old, and say the
-    // same thing as always so the form still cannot be used to find out who
-    // works here.
-    if (existing) {
-      if (this.autoApproves(normalised)) {
-        const issued = this.approve(existing.id, "system");
-        return { ...this.emailedMessage(), userId: existing.id, ...(issued?.kind === "code" ? { code: issued.code } : {}) };
-      }
-      return same;
-    }
-
-    const userId = randomUUID();
-    this.db.run(
-      `INSERT INTO users (id, displayName, email, status, createdAt)
-       VALUES (?, ?, ?, 'pending', ?)`,
-      userId,
-      displayName.trim().slice(0, 80) || normalised.split("@")[0],
-      normalised,
-      new Date().toISOString(),
-    );
-
-    if (this.autoApproves(normalised)) {
-      const issued = this.approve(userId, "system");
-      return { ...this.emailedMessage(), userId, ...(issued?.kind === "code" ? { code: issued.code } : {}) };
-    }
-    return { ...same, userId };
-  }
-
-  private emailedMessage(): AccessRequestResult {
-    return {
-      ok: true,
-      message:
-        "Welcome — we've emailed your code to your work address. " +
-        "It works once and expires in seven days.",
-    };
-  }
-
-  private tooManyRecently(ip: string): boolean {
-    const since = new Date(Date.now() - 3_600_000).toISOString();
-    const row = this.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM request_attempts WHERE ipHash = ? AND at > ?",
-      hashIp(ip, this.ipPepper),
-      since,
-    );
-    return (row?.n ?? 0) >= MAX_REQUESTS_PER_HOUR;
-  }
-
-  private recordAttempt(ip: string): void {
-    this.db.run(
-      "INSERT INTO request_attempts (id, ipHash, at) VALUES (?, ?, ?)",
-      randomUUID(),
-      hashIp(ip, this.ipPepper),
-      new Date().toISOString(),
-    );
-    // Keep only what the window needs. An attempt log is not an access log.
-    this.db.run(
-      "DELETE FROM request_attempts WHERE at < ?",
-      new Date(Date.now() - 24 * 3_600_000).toISOString(),
-    );
-  }
-
   pending(): readonly { id: string; displayName: string; email: string; createdAt: string }[] {
     return this.db.all(
       "SELECT id, displayName, email, createdAt FROM users WHERE status = 'pending' ORDER BY createdAt",
@@ -359,17 +145,18 @@ export class Access {
    * copy of the database does not hand anybody a working code.
    */
   approve(userId: string, adminId: string): ApprovalResult | undefined {
-    const user = this.db.get<{ id: string; passwordHash: string | null }>(
-      "SELECT id, passwordHash FROM users WHERE id = ?",
+    const user = this.db.get<{ id: string; email: string }>(
+      "SELECT id, email FROM users WHERE id = ?",
       userId,
     );
     if (!user) return undefined;
 
     const now0 = new Date();
-    // A colleague who registered themselves already chose a password. Minting
-    // a code for them would hand out a second credential nobody asked for and
-    // tell them to sign in with the wrong one. Approval is the whole action.
-    if (user.passwordHash) {
+    // A colleague who registered themselves gave a real address, so a link can
+    // reach them and approval is the whole action. Only an invited row — whose
+    // "address" is the `invite:` placeholder that exists to satisfy the unique
+    // index and can receive nothing — needs a code.
+    if (!user.email.startsWith("invite:")) {
       this.db.run(
         "UPDATE users SET status = 'approved', approvedBy = ?, approvedAt = ? WHERE id = ?",
         adminId,
@@ -377,7 +164,7 @@ export class Access {
         userId,
       );
       this.db.audit(adminId, "user", userId, "approve");
-      return { kind: "password" };
+      return { kind: "link" };
     }
 
     const code = generateCode();
@@ -412,36 +199,5 @@ export class Access {
     // Ending access must end it now, not at the next login.
     this.db.run("DELETE FROM sessions WHERE userId = ?", userId);
     this.db.audit(adminId, "user", userId, "suspend");
-  }
-
-  /**
-   * Redeem a code. Returns the user id on success.
-   *
-   * Compared in constant time, and consumed on use.
-   */
-  redeem(email: string, code: string): string | undefined {
-    const normalised = email.trim().toLowerCase();
-    const user = this.db.get<{ id: string; status: string }>(
-      "SELECT id, status FROM users WHERE email = ?",
-      normalised,
-    );
-    if (!user || user.status !== "approved") return undefined;
-
-    const rows = this.db.all<{ id: string; codeHash: string; salt: string; expiresAt: string }>(
-      "SELECT id, codeHash, salt, expiresAt FROM invite_codes WHERE userId = ? AND usedAt IS NULL",
-      user.id,
-    );
-    const now = new Date().toISOString();
-    for (const row of rows) {
-      if (row.expiresAt < now) continue;
-      const given = Buffer.from(hashCode(code, row.salt), "hex");
-      const want = Buffer.from(row.codeHash, "hex");
-      if (given.length === want.length && timingSafeEqual(given, want)) {
-        this.db.run("UPDATE invite_codes SET usedAt = ? WHERE id = ?", now, row.id);
-        this.db.audit(user.id, "user", user.id, "redeem-code");
-        return user.id;
-      }
-    }
-    return undefined;
   }
 }

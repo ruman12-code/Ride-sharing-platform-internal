@@ -271,3 +271,24 @@ CREATE TABLE IF NOT EXISTS sessions (
   createdAt TEXT NOT NULL,
   expiresAt TEXT NOT NULL
 );
+
+-- Sign-in links. The whole of authentication.
+--
+-- There are no passwords in this app. A colleague types their address and taps
+-- a link; nothing is invented, nothing is forgotten, and there is no reset flow
+-- to build because there is nothing to reset. The token is stored hashed, so a
+-- copy of this database hands nobody a working link.
+--
+-- The row is kept after use rather than deleted: `usedAt` is what makes a
+-- second tap on the same link fail, which is the property that matters when a
+-- link sits in an inbox for a week.
+CREATE TABLE IF NOT EXISTS login_links (
+  id        TEXT PRIMARY KEY,
+  userId    TEXT NOT NULL REFERENCES users(id),
+  tokenHash TEXT NOT NULL,
+  salt      TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  expiresAt TEXT NOT NULL,
+  usedAt    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_login_links_user ON login_links(userId, createdAt);
