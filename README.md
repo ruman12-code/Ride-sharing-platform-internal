@@ -2,15 +2,21 @@
 
 Replaces the macro-enabled Excel workbook that ran Aug 2023 – Jan 2024.
 
-**Status: Steps 1–5 of 9 complete.** 125 unit tests passing. A driver can
-publish a journey and a colleague can search and request a seat, in English or
-Bangla, on a 360px phone.
+**Status: steps 1–9 of the build order complete, against the `local-json`
+adapter.** 152 unit tests and 10 browser tests passing.
+
+**The Microsoft 365 deployment is not built.** Everything runs in memory, so
+nothing persists between refreshes. See [`docs/INSTALL.md`](docs/INSTALL.md) §3.
 
 ```bash
-npm install && npm run dev     # the app
-npm test                       # 125 unit tests
+npm install && npm run dev     # the app at localhost:5173
+npm test                       # 152 unit tests
+npm run test:e2e               # 10 browser tests at 360px
 npm run typecheck              # TypeScript strict
 ```
+
+**New here?** [`docs/INSTALL.md`](docs/INSTALL.md) to run it ·
+[`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) to use it
 
 ## Why this exists
 
@@ -38,6 +44,11 @@ Read [`docs/LEGACY_AUDIT.md`](docs/LEGACY_AUDIT.md) before changing anything.
 | [`docs/LEGACY_AUDIT.md`](docs/LEGACY_AUDIT.md) | Every field, every macro, every defect, per-row migration disposition |
 | [`docs/LIQUIDITY_BASELINE.md`](docs/LIQUIDITY_BASELINE.md) | The "before" measurement, and why it cannot carry the weight the brief puts on it |
 | [`docs/ADR-001-architecture.md`](docs/ADR-001-architecture.md) | Decision, rejected options, what would reverse it |
+| [`docs/ADR-002-routing.md`](docs/ADR-002-routing.md) | Computed routing, and why Google Maps is built but disabled |
+| [`docs/INSTALL.md`](docs/INSTALL.md) | How to run it, and what does not work yet |
+| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | For colleagues and administrators |
+| [`docs/DPIA.md`](docs/DPIA.md) | Data protection impact assessment — **unsigned** |
+| [`docs/PRIVACY_NOTICE.md`](docs/PRIVACY_NOTICE.md) | English and Bangla |
 
 ## Reproducing the audit
 
@@ -71,17 +82,35 @@ src/
 2. ✅ Domain core + tests (pricing, cap, ledger, concurrency)
 3. ✅ `local-json` adapter, seeded zone graph
 4. ✅ Offer flow → Find flow → booking with concurrency
-5. ✅ Recurring commute profiles + notification loop — **sponsor checkpoint**
-6. ⬜ Ratings, incidents, credit ledger UI
-7. ⬜ Production SharePoint adapter + Excel export
-8. ⬜ Admin + metrics dashboard
-9. ⬜ E2E, load test, accessibility audit, DPIA
+5. ✅ Recurring commute profiles + notification loop
+6. ✅ Ratings, incidents, credit ledger UI
+7. ⚠️ Excel export ✅ · **SharePoint/Graph adapter not built**
+8. ✅ Admin + metrics dashboard
+9. ⚠️ E2E ✅ · accessibility ✅ · DPIA ✅ (unsigned) · **load test not run**
 
-Steps 6–9 are not started. Notably still outstanding: the SharePoint/Graph
-adapter (everything runs against `local-json` today), the Excel export, the
-admin dashboard, `docs/DPIA.md` and `docs/PRIVACY_NOTICE.md`, and the
-Playwright E2E suite. The domain core does not change when those land — that
-is what the port boundary is for.
+### What is genuinely outstanding
+
+| Gap | Consequence |
+|---|---|
+| **SharePoint/Graph adapter** | Nothing persists. This cannot go in front of colleagues for real use. |
+| **Teams tab + Power Automate flows** | The notification loop is composed and tested but has no delivery channel wired. |
+| **Load test at 20× peak** | Not run. At ~150 staff, peak is perhaps 15 concurrent users, so this is low risk — but it is not done. |
+| **DPIA signature** | Drafted, unsigned. Needs an owner and legal review before real data. |
+
+The domain core does not change when those land. That is what the port boundary
+is for.
+
+## Routing
+
+There are no pre-defined corridors. A colleague picks any origin and any
+destination and the route is computed between them, so a journey nobody
+anticipated works as well as the ones everybody expected. Every zone along a
+computed route is a valid pick-up and drop-off point.
+
+The default planner runs locally over a zone graph — no network, no cost, no
+journey data leaving the tenant. A Google Directions adapter is built and
+**disabled**; see [ADR-002](docs/ADR-002-routing.md) for why enabling it is an
+organisational decision rather than a config flag.
 
 ## Non-negotiables
 
@@ -96,3 +125,7 @@ Carried from the brief and reinforced by the audit. Each maps to a defect in
 - No driver/rider role split at signup — many colleagues are both
 - The counterfactual-mode question is never dropped to save a tap
 - Nothing ships that requires the user to remember to open it (A-02)
+- No free-text place names — the picker filters a closed, seeded set
+- The declaration from the legacy entry form stays verbatim and visible while
+  entering data: *"You are entering your Ride sharing information by yourself,
+  voluntarily"*
