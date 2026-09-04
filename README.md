@@ -9,8 +9,9 @@ adapter.** 152 unit tests and 10 browser tests passing.
 nothing persists between refreshes. See [`docs/INSTALL.md`](docs/INSTALL.md) §3.
 
 ```bash
-npm install && npm run dev     # the app at localhost:5173
-npm test                       # 152 unit tests
+npm install && npm run dev     # the app alone, at localhost:5173 (nothing saved)
+npm start                      # the pilot: app + server + SQLite, at localhost:8080
+npm test                       # 162 unit tests
 npm run test:e2e               # 10 browser tests at 360px
 npm run typecheck              # TypeScript strict
 ```
@@ -92,7 +93,7 @@ src/
 
 | Gap | Consequence |
 |---|---|
-| **SharePoint/Graph adapter** | Nothing persists. This cannot go in front of colleagues for real use. |
+| **SharePoint/Graph adapter** | Not built — but no longer blocking. The [pilot server](server/README.md) stores data in SQLite and needs no SharePoint, so this can go in front of colleagues now. |
 | **Teams tab + Power Automate flows** | The notification loop is composed and tested but has no delivery channel wired. |
 | **Load test at 20× peak** | Not run. At ~150 staff, peak is perhaps 15 concurrent users, so this is low risk — but it is not done. |
 | **DPIA signature** | Drafted, unsigned. Needs an owner and legal review before real data. |

@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx tools/seed.ts",
     "test:e2e": "playwright test",
-    "build:routes": "tsx tools/build-route-table.ts"
+    "build:routes": "tsx tools/build-route-table.ts",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "npm run build && npm run build:server && node dist-server/server/index.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
