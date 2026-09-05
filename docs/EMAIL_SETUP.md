@@ -1,12 +1,15 @@
 # Setting up email
 
-Email is one of the two ways Ekpothe reaches a colleague who is not looking at
-the app. Push is the other; each covers the other's failure. **Push is already
-set up** — `npm run setup` generated the keys, because they are self-signed and
-need no account. Email needs credentials only you can obtain, so it is here.
+**Nobody can sign in until this works.** Signing in means tapping a link sent to
+your address — there is no password and no second door — so email is not a nice
+extra here, it is the entrance.
 
-Without email the app still pushes to phones. With it, a colleague who never
-granted notification permission still finds out that somebody wants a seat.
+It also carries the notifications that push cannot: a colleague who never
+granted notification permission still learns that somebody wants a seat.
+
+**Push is already set up** — `npm run setup` generated those keys, because they
+are self-signed and need no account. Email needs credentials only you can
+obtain, which is why this page exists.
 
 ---
 
@@ -14,16 +17,70 @@ granted notification permission still finds out that somebody wants a seat.
 
 | | Free? | Setup | Good for |
 |---|---|---|---|
-| **Brevo** | 300 emails/day | ~10 min | **Recommended.** Proper transactional sending, generous free tier |
+| **Gmail, from a dedicated account** | ~500/day | ~5 min | **Recommended.** See below |
+| **Brevo** | 300 emails/day | ~10 min | Better at scale; worse deliverability without a domain |
 | **Resend** | 100/day, 3k/month | ~5 min | Simplest. Needs a domain for anything beyond testing |
-| **Gmail app password** | ~500/day | ~5 min | Quickest, but see the caveats |
 | Your own domain via the host | varies | varies | Later, once you buy a domain |
 
-At eight colleagues, a busy day is perhaps thirty emails. Any of these is ample.
+At twenty colleagues, a busy day is perhaps fifty emails. Any of these is ample;
+the difference between them is deliverability, not volume.
 
 ---
 
-## Option A — Brevo *(recommended)*
+## Why a dedicated Gmail account, and not Brevo
+
+This reverses an earlier recommendation in this file, for a reason that only
+became decisive once the sign-in link became the **only** way in.
+
+You have no domain, so `SMTP_FROM` is a `gmail.com` address. Sending mail *from*
+gmail.com through Brevo's servers means SPF names Brevo's IP rather than
+Google's, and DKIM is signed by Brevo's domain rather than gmail.com — so
+neither aligns with the From address. Consumer gmail.com publishes `p=none`, so
+nothing bounces. It is simply weighted toward spam.
+
+For a newsletter that is a nuisance. Here, the message being filtered is the one
+that lets a colleague into the app, and the form deliberately says "a link is on
+its way" whether or not it arrived, so nobody can tell you it did not. That is
+the failure that ends a pilot quietly.
+
+Sending through Google's own servers with a gmail.com From aligns perfectly, and
+your colleagues are on exactly the personal inboxes that trust it most.
+
+**A separate account, not your personal one.** A Gmail App Password grants broad
+access to that mailbox, so if the server is ever compromised the blast radius
+should be an account that holds nothing. It is better for the app too:
+colleagues see mail from Ekpothe, and their replies do not land in your inbox.
+
+Revisit Brevo if you ever put a real domain in front of this — with a domain you
+control, its alignment is fine and its sending reputation is better than any
+individual account's.
+
+## Option A — a dedicated Gmail account *(recommended)*
+
+1. Create a new Google account, e.g. `ekpothe.dhaka@gmail.com`. Free, no card.
+2. Turn on 2-Step Verification on it — App Passwords do not exist without it.
+3. Google Account → Security → App passwords → create one named "Ekpothe".
+4. Use the 16-character password Google shows. **Not** the account password.
+
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=ekpothe.dhaka@gmail.com
+SMTP_PASS=<the 16-character app password, no spaces>
+SMTP_FROM=Ekpothe <ekpothe.dhaka@gmail.com>
+```
+
+Then prove it, before anything else:
+
+```sh
+npm run preflight -- your.own@email.com
+```
+
+That opens a real connection, authenticates, and sends a real message. Check
+**which folder it lands in**. If it is spam, mark it "not spam" and say so in
+your invitation message — a link nobody can find is a link nobody can use.
+
+## Option B — Brevo
 
 1. Sign up at **brevo.com** with your personal email. Free, no card.
 2. **SMTP & API** → **SMTP** tab.
