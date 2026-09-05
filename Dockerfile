@@ -27,6 +27,15 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
 
+# The preflight check ships too, so the mailer can be tested from inside the
+# running container against the real secrets:
+#
+#   fly ssh console -C "node tools/preflight.mjs you@example.com"
+#
+# Testing it anywhere else tests a different configuration. Its only dependency
+# is nodemailer, which is a production dependency already.
+COPY tools/preflight.mjs ./tools/preflight.mjs
+
 # The database lives on the mounted volume, not in the image layer, or every
 # deploy would wipe the pilot. See fly.toml.
 ENV DB_PATH=/data/carpool.db
