@@ -558,7 +558,22 @@ const server = OWN_TLS
 // Without TLS, bind to loopback only. A pilot reachable across the office in
 // the clear is worse than a pilot nobody can reach, because the second failure
 // is visible and the first is not.
-const HOST = SECURE ? "0.0.0.0" : "127.0.0.1";
+/**
+ * Which interface to listen on.
+ *
+ * Without TLS, loopback only — a pilot reachable across the office in the clear
+ * is worse than one nobody can reach, because the second failure is visible and
+ * the first is not.
+ *
+ * With TLS terminated upstream the default opens up, because on a platform like
+ * Fly the proxy reaches the process over a private network. That default is
+ * wrong when the proxy is on this same machine — Tailscale Funnel and Caddy
+ * both connect to localhost — and binding every interface there would also
+ * publish the app in plaintext to everyone on the office LAN, next to the
+ * HTTPS address colleagues were given. `BIND_HOST=127.0.0.1` is how that is
+ * said explicitly.
+ */
+const HOST = process.env["BIND_HOST"] ?? (SECURE ? "0.0.0.0" : "127.0.0.1");
 
 /**
  * The T−45min reconfirm, and nothing else on a timer.
@@ -694,7 +709,7 @@ runAutoCompleteSweep();
 server.listen(PORT, HOST, () => {
   const scheme = OWN_TLS ? "https" : "http";
   console.log(`Ekpothe — pilot server`);
-  console.log(`  ${scheme}://${HOST === "0.0.0.0" ? "0.0.0.0" : "localhost"}:${PORT}`);
+  console.log(`  ${scheme}://${HOST === "0.0.0.0" ? "0.0.0.0" : HOST}:${PORT}`);
   console.log(`  database:   ${DB_PATH}`);
   /*
     Reported per channel, not as one verdict.
@@ -731,7 +746,7 @@ server.listen(PORT, HOST, () => {
   if (OWN_TLS) {
     console.log(`  TLS:        this process, from TLS_CERT and TLS_KEY`);
   } else if (TRUST_PROXY) {
-    console.log(`  TLS:        terminated upstream (TRUST_PROXY=1)`);
+    console.log(`  TLS:        terminated upstream (TRUST_PROXY=1), listening on ${HOST}`);
   } else {
     console.log("");
     console.log("  NOT SERVING TO THE NETWORK — no TLS configured.");

@@ -10,5 +10,7 @@ test-results/
 dist-server/
 carpool.db*
 .env.local
+# ...but the template with no secrets in it is the point.
+!.env.example
 .env
 tsconfig.tsbuildinfo

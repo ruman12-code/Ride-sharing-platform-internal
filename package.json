@@ -16,7 +16,8 @@
     "build:server": "tsc -p tsconfig.server.json && node tools/copy-assets.mjs",
     "start": "npm run build && npm run build:server && node dist-server/server/index.js",
     "setup": "node tools/setup-env.mjs",
-    "preflight": "node tools/preflight.mjs"
+    "preflight": "node tools/preflight.mjs",
+    "serve": "npm run build && npm run build:server && node dist-server/server/index.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
