@@ -149,6 +149,10 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
                       // reflects the server even if another admin device
                       // approved somebody at the same moment.
                       void loadPending();
+                      // And the member list below, or somebody just approved is
+                      // missing from "colleagues who are in" until a reload —
+                      // which reads as the approval not having worked.
+                      void app.refresh();
                     })
                     .finally(() => setApproving(undefined));
                 }}
