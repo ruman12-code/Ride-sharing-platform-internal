@@ -208,7 +208,6 @@ test("the strapline spells the builder's name down its initials", async ({ page 
   // Each line must still read as a whole sentence to a screen reader.
   const spoken = await page.locator(".strapline .sr-only").allInnerTexts();
   expect(spoken[0]).toBe("Ride together, not alone.");
-  await expect(page.getByText("Built for us, by Ruman")).toBeVisible();
 });
 
 test("the whole interface switches to Bangla", async ({ page }) => {

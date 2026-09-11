@@ -263,7 +263,6 @@ export const AccessGate = ({
       <div className="card">
         <Strapline lang={lang} />
       </div>
-      <p className="credit"><strong>{t("builtBy", lang)}</strong></p>
     </div>
   );
 };

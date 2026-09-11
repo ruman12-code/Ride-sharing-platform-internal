@@ -694,15 +694,6 @@ body {
 }
 .strapline-bn { font-size: 14px; color: var(--ink-soft); margin: 0; }
 
-.credit {
-  text-align: center;
-  font-size: 12px;
-  color: var(--ink-faint);
-  padding: 22px 0 6px;
-  letter-spacing: 0.02em;
-}
-.credit strong { color: var(--ink-soft); font-weight: 600; }
-
 /* ---------- admin stats ---------- */
 .statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .stat { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px; background: var(--card); }

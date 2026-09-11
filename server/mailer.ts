@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+import { resolve4 } from "node:dns/promises";
 import { createTransport, type Transporter } from "nodemailer";
 
 /**
@@ -54,28 +56,66 @@ export const createMailer = (): Mailer => {
 
   const port = Number(process.env["SMTP_PORT"] ?? 587);
   const user = process.env["SMTP_USER"];
-  const transport: Transporter = createTransport({
-    host,
-    port,
-    // STARTTLS on 587 is the norm; implicit TLS on 465 is the exception.
-    secure: port === 465,
-    // Spread rather than an undefined value: some relays reject a login
-    // attempt outright, so an unauthenticated transport has to omit the key
-    // entirely rather than pass an empty one.
-    ...(user ? { auth: { user, pass: process.env["SMTP_PASS"] ?? "" } } : {}),
-  });
+
+  /*
+    Connect over IPv4, by resolving the host here rather than leaving it to the
+    library.
+
+    This cost a pilot its launch. Nodemailer resolves the host itself, combines
+    the IPv4 and IPv6 answers, and then picks one **at random**. Plenty of
+    container platforms — Render's free tier among them — have no IPv6 route, so
+    on those the mailer works or fails depending on a coin flip, and the failure
+    reads `connect ENETUNREACH 2404:6800:4003:c06::6c:587`: indistinguishable
+    from a wrong password unless you notice the address is IPv6.
+
+    Resolving to an A record here removes the coin flip. `servername` carries
+    the original hostname so TLS still validates against the certificate rather
+    than against an IP that would never match it.
+
+    Re-resolved per connection rather than pinned at startup, because a mail
+    provider's addresses change and this process is meant to run for months.
+    Falling back to the hostname on a resolution failure keeps the old
+    behaviour rather than inventing a new way to be broken.
+  */
+  const connectHost = async (): Promise<string> => {
+    if (isIP(host)) return host;
+    try {
+      const [first] = await resolve4(host);
+      return first ?? host;
+    } catch {
+      return host;
+    }
+  };
+
+  const open = async (): Promise<Transporter> =>
+    createTransport({
+      host: await connectHost(),
+      port,
+      // STARTTLS on 587 is the norm; implicit TLS on 465 is the exception.
+      secure: port === 465,
+      // The certificate is issued to the name, not the address we dialled.
+      tls: { servername: host },
+      // Spread rather than an undefined value: some relays reject a login
+      // attempt outright, so an unauthenticated transport has to omit the key
+      // entirely rather than pass an empty one.
+      ...(user ? { auth: { user, pass: process.env["SMTP_PASS"] ?? "" } } : {}),
+    });
 
   return {
     enabled: true,
     async verify() {
+      const transport = await open();
       try {
         await transport.verify();
         return { ok: true };
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      } finally {
+        transport.close();
       }
     },
     async send(to, subject, text, html) {
+      const transport = await open();
       try {
         await transport.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
         return true;
@@ -84,6 +124,8 @@ export const createMailer = (): Mailer => {
         // the form whether that address exists or was deliverable.
         console.error("mail send failed:", e);
         return false;
+      } finally {
+        transport.close();
       }
     },
   };

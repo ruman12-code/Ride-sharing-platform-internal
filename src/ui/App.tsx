@@ -103,9 +103,6 @@ export const App = () => {
         )}
         {screen === "mine" && <MyRides app={app} lang={lang} />}
         {screen === "admin" && app.isAdmin && <Admin app={app} lang={lang} />}
-        <p className="credit">
-          <strong>{t("builtBy", lang)}</strong>
-        </p>
       </main>
 
       <nav className="tabbar" aria-label="Main">

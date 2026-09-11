@@ -416,7 +416,6 @@ export const STRINGS = {
 
   // About
   about: { en: "About", bn: "পরিচিতি" },
-  builtBy: { en: "Built for us, by Ruman", bn: "আমাদের জন্য, রুমানের তৈরি" },
   aboutBody: {
     en: "Ekpothe replaces the ride-sharing spreadsheet. Same idea, but it comes to you instead of waiting in a folder — and it works from your phone.",
     bn: "একপথে সেই রাইড শেয়ারিং স্প্রেডশিটের জায়গা নিয়েছে। ভাবনা একই, তবে এটি ফোল্ডারে অপেক্ষা না করে আপনার কাছে আসে — এবং ফোন থেকেই চলে।",

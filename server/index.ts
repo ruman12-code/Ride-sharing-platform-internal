@@ -1,3 +1,4 @@
+import { setDefaultResultOrder } from "node:dns";
 import { createServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { readFileSync, existsSync } from "node:fs";
@@ -9,6 +10,25 @@ import { signInLinkEmail, createMailer } from "./mailer.js";
 import { Accounts, parseBlockedDomains } from "./accounts.js";
 import { MagicLinks } from "./magic-link.js";
 import { Notifier, notifications } from "./notify.js";
+
+/*
+  Prefer IPv4 when resolving hostnames.
+
+  Node picks whatever DNS returns first, and for Google's hosts that is an IPv6
+  address. Plenty of container platforms — Render's free tier among them — have
+  no IPv6 route at all, so the connection fails with ENETUNREACH before a single
+  byte leaves: `connect ENETUNREACH 2404:6800:4003:c06::6c:587`.
+
+  That failure is indistinguishable from a wrong password if you only look at
+  the symptom, and it silently breaks BOTH channels this app depends on — SMTP
+  to Gmail and web push to Google's push service — while every setting appears
+  correct. An hour of a pilot's launch went into finding it.
+
+  This is a preference, not a restriction: a host with working IPv6 still uses
+  it when there is no A record. Set PREFER_IPV6=1 on a network where the
+  reverse is true.
+*/
+if (process.env["PREFER_IPV6"] !== "1") setDefaultResultOrder("ipv4first");
 
 /**
  * Standalone pilot server.
