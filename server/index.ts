@@ -137,6 +137,27 @@ const VAPID_PUBLIC = process.env["VAPID_PUBLIC_KEY"];
 const VAPID_PRIVATE = process.env["VAPID_PRIVATE_KEY"];
 
 const mailer = createMailer();
+
+/**
+ * What the last check of the mail relay said.
+ *
+ * Held so `/api/health` can report it. The administrator of a pilot on a free
+ * hosting tier may have no shell and no easy route to a log viewer, and this is
+ * the failure that looks like success from every other angle: the sign-in form
+ * deliberately says "a link is on its way" whether or not one was sent, so that
+ * it cannot be used to discover who has registered.
+ *
+ * That was the right call, and it leaves the operator with nothing to go on.
+ * This is the compensating instrument.
+ */
+let mailStatus: { ok: boolean; error?: string } = { ok: false, error: "not checked yet" };
+
+const checkMailer = async (): Promise<typeof mailStatus> => {
+  mailStatus = mailer.enabled
+    ? await mailer.verify()
+    : { ok: false, error: "SMTP_HOST and SMTP_FROM are not set" };
+  return mailStatus;
+};
 const accounts = new Accounts(db, BLOCKED_DOMAINS, ADMIN_EMAIL);
 const magicLinks = new MagicLinks(db);
 const notifier = new Notifier(
@@ -341,13 +362,34 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           about who is registered.
         */
         if (url.pathname === "/api/health") {
+          /*
+            Says which of the two things that can be silently broken is broken.
+
+            Deliberately open, because a health checker carries no cookie, and
+            deliberately vague: whether mail is configured, and the connection
+            error when it is not, tell an outsider nothing about who has
+            registered. `?recheck=1` re-tests the relay, so a corrected password
+            can be confirmed without waiting out a redeploy.
+          */
           try {
-            await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users");
-            return send(200, { ok: true });
+            await db.get<{ n: number }>("SELECT COUNT(*)::int AS n FROM users");
           } catch (e) {
             console.error("health check failed:", e);
-            return send(503, { ok: false });
+            return send(503, { ok: false, database: "unreachable" });
           }
+          if (url.searchParams.get("recheck") === "1") await checkMailer();
+          return send(200, {
+            ok: true,
+            database: "ok",
+            // The reason is included because "broken" on its own sends the
+            // operator back to the logs this endpoint exists to replace.
+            email: mailer.enabled
+              ? mailStatus.ok
+                ? "ok"
+                : `broken: ${mailStatus.error}`
+              : "not configured — SMTP_HOST or SMTP_FROM is missing",
+            push: notifier.canPush ? "on" : "off",
+          });
         }
 
         if (url.pathname === "/api/config") {
@@ -777,7 +819,7 @@ server.listen(PORT, HOST, () => {
     // not held up for a relay that may be slow, but the truth still lands in
     // the same place the administrator is already looking.
     console.log("  email:      settings present — checking the relay…");
-    void mailer.verify().then((v) => {
+    void checkMailer().then((v) => {
       console.log(
         v.ok
           ? "  email:      relay reachable and accepted the login"

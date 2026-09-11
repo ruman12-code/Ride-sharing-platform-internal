@@ -144,6 +144,24 @@ export class Db {
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 15_000,
     });
+
+    /*
+      An idle connection dying must not take the server with it.
+
+      `pg.Pool` emits `error` on a client that fails while sitting idle, and an
+      unhandled `error` event ends the Node process. Nothing about that is
+      exotic: managed Postgres on a free tier scales its compute to zero and
+      closes idle connections as a matter of routine, so without this listener
+      the app crash-loops in normal operation — and the crash happens between
+      requests, so nothing in the request log explains it.
+
+      There is nothing to do but note it. The pool discards the broken client
+      and opens a fresh one for the next query, which is the behaviour that was
+      wanted all along.
+    */
+    this.pool.on("error", (err) => {
+      console.error("database connection dropped (the pool will reconnect):", err.message);
+    });
   }
 
   /** Create tables if they are not there. Safe to run on every boot. */
