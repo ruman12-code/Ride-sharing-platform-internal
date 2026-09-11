@@ -170,13 +170,62 @@ const mailer = createMailer();
  * That was the right call, and it leaves the operator with nothing to go on.
  * This is the compensating instrument.
  */
-let mailStatus: { ok: boolean; error?: string } = { ok: false, error: "not checked yet" };
+type MailStatus =
+  | { state: "unknown" }
+  | { state: "checking" }
+  | { state: "ok" }
+  | { state: "broken"; error: string };
 
-const checkMailer = async (): Promise<typeof mailStatus> => {
-  mailStatus = mailer.enabled
-    ? await mailer.verify()
-    : { ok: false, error: "SMTP_HOST and SMTP_FROM are not set" };
-  return mailStatus;
+let mailStatus: MailStatus = { state: "unknown" };
+
+/**
+ * Check the relay, at most once at a time.
+ *
+ * The single flight matters because this instance sleeps: waking it runs the
+ * boot check while the request that woke it is still in flight, and both would
+ * otherwise open their own connection to the relay.
+ */
+let inFlight: Promise<MailStatus> | undefined;
+
+const checkMailer = (): Promise<MailStatus> => {
+  if (inFlight) return inFlight;
+  mailStatus = { state: "checking" };
+  inFlight = (async () => {
+    if (!mailer.enabled) {
+      mailStatus = { state: "broken", error: "SMTP_HOST or SMTP_FROM is not set" };
+    } else {
+      /*
+        Bounded, because an unreachable relay can hang for a long time and this
+        is called from a health endpoint. A check that never returns would make
+        the host conclude the app is dead and restart it — turning a mail
+        problem into an outage.
+      */
+      const timeout = new Promise<{ ok: false; error: string }>((res) =>
+        setTimeout(() => res({ ok: false, error: "relay did not answer within 15s" }), 15_000).unref(),
+      );
+      const v = await Promise.race([mailer.verify(), timeout]);
+      mailStatus = v.ok ? { state: "ok" } : { state: "broken", error: v.error ?? "unknown error" };
+    }
+    inFlight = undefined;
+    return mailStatus;
+  })();
+  return inFlight;
+};
+
+/**
+ * How to say it, without saying something untrue.
+ *
+ * "not checked yet" was reported as `broken`, which is a different claim from
+ * the one the server could actually make and sends the reader looking for a
+ * fault that may not exist. Unknown is unknown.
+ */
+const describeMail = (s: MailStatus): string => {
+  switch (s.state) {
+    case "ok": return "ok";
+    case "checking": return "checking the relay — reload in a moment";
+    case "broken": return `broken: ${s.error}`;
+    case "unknown": return "not checked yet — add ?recheck=1 to test it now";
+  }
 };
 const accounts = new Accounts(db, BLOCKED_DOMAINS, ADMIN_EMAIL);
 const magicLinks = new MagicLinks(db);
@@ -397,17 +446,19 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             console.error("health check failed:", e);
             return send(503, { ok: false, database: "unreachable" });
           }
-          if (url.searchParams.get("recheck") === "1") await checkMailer();
+          if (url.searchParams.get("recheck") === "1") {
+            await checkMailer();
+          } else if (mailStatus.state === "unknown") {
+            // Start it, but do not wait: the host's own health check calls this
+            // endpoint and must stay fast.
+            void checkMailer();
+          }
           return send(200, {
             ok: true,
             database: "ok",
             // The reason is included because "broken" on its own sends the
             // operator back to the logs this endpoint exists to replace.
-            email: mailer.enabled
-              ? mailStatus.ok
-                ? "ok"
-                : `broken: ${mailStatus.error}`
-              : "not configured — SMTP_HOST or SMTP_FROM is missing",
+            email: describeMail(mailStatus),
             push: notifier.canPush ? "on" : "off",
           });
         }
@@ -841,9 +892,9 @@ server.listen(PORT, HOST, () => {
     console.log("  email:      settings present — checking the relay…");
     void checkMailer().then((v) => {
       console.log(
-        v.ok
+        v.state === "ok"
           ? "  email:      relay reachable and accepted the login"
-          : `  email:      BROKEN — ${v.error}\n              Approval mail will not arrive. See docs/EMAIL_SETUP.md`,
+          : `  email:      ${describeMail(v).toUpperCase()}\n              Approval mail will not arrive. See docs/EMAIL_SETUP.md`,
       );
     });
   }
