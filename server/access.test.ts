@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "./db.js";
-import { freshDb, hasPostgres, type TestDb } from "./test-db.js";
+import { dropIfCreated, freshDb, hasPostgres, type TestDb } from "./test-db.js";
 import { Access, type ApprovalResult, CODE_VALID_DAYS, generateCode } from "./access.js";
 import { MagicLinks } from "./magic-link.js";
 
@@ -22,7 +22,7 @@ beforeEach(async () => {
   access = new Access(db);
 });
 afterEach(async () => {
-  await handle.drop();
+  await dropIfCreated(handle);
 });
 
 const codeOf = (r: ApprovalResult | undefined): string => {

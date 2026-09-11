@@ -25,6 +25,18 @@ export interface TestDb {
   drop(): Promise<void>;
 }
 
+/**
+ * Tear down whatever setup managed to create.
+ *
+ * When `freshDb()` itself fails — the database is not running, the credentials
+ * are wrong — `handle` is never assigned, and an afterEach that assumes it
+ * exists throws "Cannot read properties of undefined", which is then the only
+ * error anybody sees. The real cause is one line above and invisible.
+ */
+export const dropIfCreated = async (handle: TestDb | undefined): Promise<void> => {
+  if (handle) await handle.drop();
+};
+
 export const freshDb = async (): Promise<TestDb> => {
   const name = `ekpothe_test_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: TEST_URL });

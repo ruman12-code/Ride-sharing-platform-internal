@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "./db.js";
-import { freshDb, hasPostgres, type TestDb } from "./test-db.js";
+import { dropIfCreated, freshDb, hasPostgres, type TestDb } from "./test-db.js";
 import { LINK_VALID_MINUTES, MAX_LINKS_PER_HOUR, MagicLinks } from "./magic-link.js";
 
 let handle: TestDb;
@@ -33,7 +33,7 @@ beforeEach(async () => {
   await addUser("u-nusrat", "nusrat@personal.com");
 });
 afterEach(async () => {
-  await handle.drop();
+  await dropIfCreated(handle);
 });
 
 describe.skipIf(!hasPostgres)("asking for a link", () => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "./db.js";
-import { freshDb, hasPostgres, type TestDb } from "./test-db.js";
+import { dropIfCreated, freshDb, hasPostgres, type TestDb } from "./test-db.js";
 import { Access } from "./access.js";
 import { MagicLinks } from "./magic-link.js";
 import { Accounts, isWorkAddress, parseBlockedDomains } from "./accounts.js";
@@ -15,7 +15,7 @@ beforeEach(async () => {
   accounts = new Accounts(db, ["giz.de"], "ruman@personal.com");
 });
 afterEach(async () => {
-  await handle.drop();
+  await dropIfCreated(handle);
 });
 
 const good = {

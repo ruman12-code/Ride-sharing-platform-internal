@@ -119,12 +119,25 @@ export class Db {
   constructor(connectionString: string) {
     this.pool = new pg.Pool({
       connectionString,
-      // Managed Postgres serves TLS with its own certificate chain; the
-      // connection is encrypted, and the host is authenticated by the
-      // connection string being a secret.
+      /*
+        TLS, verified.
+
+        An earlier version passed `rejectUnauthorized: false` and justified it
+        by saying the connection string is a secret. That is not an argument:
+        without verification anybody who can intercept the connection presents
+        whatever certificate they like and reads every journey, address and
+        sign-in link in the traffic, and the secrecy of the string does nothing
+        to stop them. Managed Postgres — Neon, Supabase — serves an ordinary
+        CA-signed certificate, so verifying is simply correct and costs nothing.
+
+        PGSSL_NO_VERIFY exists for a provider with a self-signed certificate.
+        It is a deliberate, named downgrade rather than a silent default.
+      */
       ...(/\bsslmode=disable\b/.test(connectionString)
         ? {}
-        : { ssl: { rejectUnauthorized: false } }),
+        : process.env["PGSSL_NO_VERIFY"] === "1"
+          ? { ssl: { rejectUnauthorized: false } }
+          : { ssl: { rejectUnauthorized: true } }),
       // A free tier allows few connections, and this app is not busy. Holding
       // a large pool open is how a small app exhausts a small database.
       max: Number(process.env["PGPOOL_MAX"] ?? 5),
