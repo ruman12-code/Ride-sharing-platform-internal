@@ -54,9 +54,13 @@ BLOCKED_EMAIL_DOMAINS=giz.de
 ADMIN_EMAIL=
 APP_URL=http://localhost:8080
 
+# --- Database ---------------------------------------------------------------
+# Postgres. Free and no card at neon.tech. See docs/DEPLOY.md.
+DATABASE_URL=
+
 # --- Deployment -------------------------------------------------------------
 # TRUST_PROXY=1        when something in front terminates TLS
-# DB_PATH=/data/carpool.db
+# BIND_HOST=127.0.0.1  only when that proxy runs on this same machine
 `;
 
 writeFileSync(path, existing ? existing + "\n" + contents : contents, "utf8");

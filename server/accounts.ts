@@ -65,7 +65,7 @@ export class Accounts {
     private readonly adminEmail: string = "",
   ) {}
 
-  register(input: RegistrationInput): RegistrationResult {
+  async register(input: RegistrationInput): Promise<RegistrationResult> {
     const email = input.email.trim().toLowerCase();
 
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
@@ -109,7 +109,7 @@ export class Accounts {
         "You'll be able to sign in once it's approved.",
     };
 
-    const existing = this.db.get<{ id: string }>("SELECT id FROM users WHERE email = ?", email);
+    const existing = await this.db.get<{ id: string }>("SELECT id FROM users WHERE email = ?", email);
     if (existing) return same;
 
     const adminWelcome: RegistrationResult = {
@@ -117,7 +117,7 @@ export class Accounts {
       message: "You're the administrator — signed up and approved. Sign in now.",
     };
 
-    this.db.run(
+    await this.db.run(
       `INSERT INTO users
          (id, displayName, email, status, role,
           officialName, department, createdAt)
@@ -134,15 +134,15 @@ export class Accounts {
     return isAdmin ? adminWelcome : same;
   }
 
-  pending(): readonly {
+  async pending(): Promise<readonly {
     id: string;
     displayName: string;
     email: string;
     officialName: string | null;
     department: string | null;
     createdAt: string;
-  }[] {
-    return this.db.all(
+  }[]> {
+    return await this.db.all(
       `SELECT id, displayName, email, officialName, department, createdAt
          FROM users WHERE status = 'pending' ORDER BY createdAt`,
     );

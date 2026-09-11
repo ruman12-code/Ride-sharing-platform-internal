@@ -77,9 +77,9 @@ export class MagicLinks {
    * including success — otherwise this form becomes a way to find out who works
    * here and who has signed up.
    */
-  request(email: string, now: Date = new Date()): LinkRequestOutcome | undefined {
+  async request(email: string, now: Date = new Date()): Promise<LinkRequestOutcome | undefined> {
     const normalised = email.trim().toLowerCase();
-    const user = this.db.get<{
+    const user = await this.db.get<{
       id: string;
       email: string;
       displayName: string;
@@ -92,8 +92,8 @@ export class MagicLinks {
     if (!user || user.isSuspended || user.status !== "approved") return undefined;
 
     const hourAgo = new Date(now.getTime() - 3_600_000).toISOString();
-    const recent = this.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM login_links WHERE userId = ? AND createdAt > ?",
+    const recent = await this.db.get<{ n: number }>(
+      "SELECT COUNT(*)::int AS n FROM login_links WHERE userId = ? AND createdAt > ?",
       user.id,
       hourAgo,
     );
@@ -102,7 +102,7 @@ export class MagicLinks {
     // Asking for a new link retires the old ones. Two live links to one account
     // is one more than anybody needs, and the older one is usually the one
     // sitting in an inbox somebody else can reach.
-    this.db.run(
+    await this.db.run(
       "UPDATE login_links SET usedAt = ? WHERE userId = ? AND usedAt IS NULL",
       now.toISOString(),
       user.id,
@@ -111,7 +111,7 @@ export class MagicLinks {
     const id = randomBytes(9).toString("base64url"); // 12 chars
     const secret = randomBytes(16).toString("base64url"); // 22 chars, 128 bits
     const salt = randomBytes(16).toString("hex");
-    this.db.run(
+    await this.db.run(
       `INSERT INTO login_links (id, userId, tokenHash, salt, createdAt, expiresAt)
        VALUES (?, ?, ?, ?, ?, ?)`,
       id,
@@ -131,11 +131,11 @@ export class MagicLinks {
    * Consumed on use, so a link that has been tapped — or that a mail scanner
    * followed — cannot be tapped again.
    */
-  redeem(token: string, now: Date = new Date()): string | undefined {
+  async redeem(token: string, now: Date = new Date()): Promise<string | undefined> {
     const [id = "", secret = ""] = token.trim().split(".");
     if (!id || !secret) return undefined;
 
-    const row = this.db.get<{
+    const row = await this.db.get<{
       userId: string;
       tokenHash: string;
       salt: string;
@@ -151,14 +151,14 @@ export class MagicLinks {
     // Re-check the account at the moment of redemption, not only when the link
     // was minted. Somebody suspended in the twenty minutes since must not be
     // let in by a link that was valid when it was sent.
-    const user = this.db.get<{ status: string; isSuspended: number }>(
+    const user = await this.db.get<{ status: string; isSuspended: number }>(
       "SELECT status, isSuspended FROM users WHERE id = ?",
       row.userId,
     );
     if (!user || user.isSuspended || user.status !== "approved") return undefined;
 
-    this.db.run("UPDATE login_links SET usedAt = ? WHERE id = ?", now.toISOString(), id);
-    this.db.audit(row.userId, "user", row.userId, "sign-in-link");
+    await this.db.run("UPDATE login_links SET usedAt = ? WHERE id = ?", now.toISOString(), id);
+    await this.db.audit(row.userId, "user", row.userId, "sign-in-link");
     return row.userId;
   }
 }

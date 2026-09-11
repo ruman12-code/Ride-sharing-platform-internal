@@ -68,10 +68,10 @@ export class Api {
   // administrator who recognises the name approves them, and a single-use code
   // is issued to that one person. See server/access.ts for the three gates.
 
-  createSession(userId: string): string {
+  async createSession(userId: string): Promise<string> {
     const token = randomUUID() + randomUUID();
     const now = Date.now();
-    this.db.run(
+    await this.db.run(
       "INSERT INTO sessions (token, userId, createdAt, expiresAt) VALUES (?, ?, ?, ?)",
       token,
       userId,
@@ -81,9 +81,9 @@ export class Api {
     return token;
   }
 
-  sessionFor(token: string | undefined): Session | undefined {
+  async sessionFor(token: string | undefined): Promise<Session | undefined> {
     if (!token) return undefined;
-    const row = this.db.get<{ userId: string; expiresAt: string }>(
+    const row = await this.db.get<{ userId: string; expiresAt: string }>(
       "SELECT userId, expiresAt FROM sessions WHERE token = ?",
       token,
     );
@@ -105,13 +105,13 @@ export class Api {
     const expiry = new Date(row.expiresAt);
     const full = SESSION_MS;
     if (expiry.getTime() - now.getTime() < full - 24 * 3_600_000) {
-      this.db.run(
+      await this.db.run(
         "UPDATE sessions SET expiresAt = ? WHERE token = ?",
         new Date(now.getTime() + full).toISOString(),
         token,
       );
     }
-    const user = this.db.get<User & { status: string }>(
+    const user = await this.db.get<User & { status: string }>(
       "SELECT * FROM users WHERE id = ?",
       row.userId,
     );
@@ -123,8 +123,8 @@ export class Api {
   }
 
   /** The contact details a colleague has chosen to share, if any. */
-  setContact(userId: Id, kind: string, value: string): void {
-    this.db.run(
+  async setContact(userId: Id, kind: string, value: string): Promise<void> {
+    await this.db.run(
       "UPDATE users SET contactKind = ?, contactValue = ? WHERE id = ?",
       kind,
       value.trim().slice(0, 60),
@@ -139,29 +139,29 @@ export class Api {
    * booking, and for any booking the driver has not yet accepted. Each release
    * is written to `contact_reveals`, so "who has my number?" has an answer.
    */
-  revealContact(
+  async revealContact(
     session: Session,
     bookingId: Id,
-  ): { readonly name: string; readonly kind: string; readonly value: string } | undefined {
-    const booking = this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
+  ): Promise<{ readonly name: string; readonly kind: string; readonly value: string } | undefined> {
+    const booking = await this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
     if (!booking) return undefined;
-    const ride = this.getRide(booking.rideId);
+    const ride = await this.getRide(booking.rideId);
     if (!ride) return undefined;
 
     const subjectId = contactCounterparty(booking, ride.driverId, session.userId);
     if (!subjectId) return undefined;
 
-    const subject = this.db.get<{ displayName: string; contactKind: string | null; contactValue: string | null }>(
+    const subject = await this.db.get<{ displayName: string; contactKind: string | null; contactValue: string | null }>(
       "SELECT displayName, contactKind, contactValue FROM users WHERE id = ?",
       subjectId,
     );
     if (!subject?.contactKind || !subject.contactValue) return undefined;
 
-    this.db.run(
+    await this.db.run(
       "INSERT INTO contact_reveals (id, bookingId, viewerId, subjectId, at) VALUES (?, ?, ?, ?, ?)",
       randomUUID(), bookingId, session.userId, subjectId, new Date().toISOString(),
     );
-    this.db.audit(session.userId, "contact", subjectId, "reveal");
+    await this.db.audit(session.userId, "contact", subjectId, "reveal");
     return { name: subject.displayName, kind: subject.contactKind, value: subject.contactValue };
   }
 
@@ -173,8 +173,8 @@ export class Api {
    * (domain/policy/contact-exchange.ts), and a directory endpoint is exactly
    * the shape that would undo that.
    */
-  listPeople(): readonly { id: Id; displayName: string; department: string; reliabilityScore: number }[] {
-    return this.db.all(
+  async listPeople(): Promise<readonly { id: Id; displayName: string; department: string; reliabilityScore: number }[]> {
+    return await this.db.all(
       `SELECT id, displayName, department, reliabilityScore
          FROM users WHERE status = 'approved' AND isSuspended = 0`,
     );
@@ -182,21 +182,23 @@ export class Api {
 
   // --- rides ------------------------------------------------------------
 
-  listRides(): readonly Ride[] {
-    return this.db
-      .all<RideRow>("SELECT * FROM rides WHERE status IN ('published','full') ORDER BY departureAt")
-      .map(toRide);
+  async listRides(): Promise<readonly Ride[]> {
+    return (
+      await this.db.all<RideRow>(
+        "SELECT * FROM rides WHERE status IN ('published','full') ORDER BY departureAt",
+      )
+    ).map(toRide);
   }
 
-  getRide(id: string): Ride | undefined {
-    const row = this.db.get<RideRow>("SELECT * FROM rides WHERE id = ?", id);
+  async getRide(id: string): Promise<Ride | undefined> {
+    const row = await this.db.get<RideRow>("SELECT * FROM rides WHERE id = ?", id);
     return row ? toRide(row) : undefined;
   }
 
-  publishRide(session: Session, input: Omit<Ride, "id" | "rowVersion" | "seatsAvailable" | "driverId" | "status">, cap: number): { ok: true; ride: Ride } | { ok: false; error: string } {
+  async publishRide(session: Session, input: Omit<Ride, "id" | "rowVersion" | "seatsAvailable" | "driverId" | "status">, cap: number): Promise<{ ok: true; ride: Ride } | { ok: false; error: string }> {
     const today = input.departureAt.slice(0, 10);
-    const publishedToday = this.db.get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM rides
+    const publishedToday = await this.db.get<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM rides
         WHERE driverId = ? AND substr(departureAt, 1, 10) = ? AND status != 'cancelled'`,
       session.userId,
       today,
@@ -215,7 +217,7 @@ export class Api {
     if (!check.ok) return { ok: false, error: check.error.message };
 
     const id = newId();
-    this.db.run(
+    await this.db.run(
       `INSERT INTO rides (id, profileId, driverId, zoneSequence, departureAt, seatsTotal,
                           seatsAvailable, costSharePerSeat, fuelPriceId, fuelRatePerKm,
                           distanceKm, pickupPoints, vehicle, preferences, notes, status,
@@ -238,18 +240,18 @@ export class Api {
       input.notes ?? null,
       new Date().toISOString(),
     );
-    this.db.audit(session.userId, "ride", id, "publish");
-    return { ok: true, ride: this.getRide(id)! };
+    await this.db.audit(session.userId, "ride", id, "publish");
+    return { ok: true, ride: (await this.getRide(id))! };
   }
 
   // --- bookings ---------------------------------------------------------
 
-  listBookingsForRide(rideId: string): readonly Booking[] {
-    return this.db.all<Booking>("SELECT * FROM bookings WHERE rideId = ?", rideId);
+  async listBookingsForRide(rideId: string): Promise<readonly Booking[]> {
+    return await this.db.all<Booking>("SELECT * FROM bookings WHERE rideId = ?", rideId);
   }
 
-  listBookingsForRider(riderId: string): readonly Booking[] {
-    return this.db.all<Booking>("SELECT * FROM bookings WHERE riderId = ?", riderId);
+  async listBookingsForRider(riderId: string): Promise<readonly Booking[]> {
+    return await this.db.all<Booking>("SELECT * FROM bookings WHERE riderId = ?", riderId);
   }
 
   /**
@@ -259,15 +261,15 @@ export class Api {
    * then write the booking. On a lost race, re-read and try once more; after
    * that the colleague is told the seat went. Nothing is ever overwritten.
    */
-  requestSeat(
+  async requestSeat(
     session: Session,
     input: {
       rideId: string; boardZoneId: string; alightZoneId: string; seats: number;
       counterfactualMode: Booking["counterfactualMode"];
       settlementMode: Booking["settlementMode"]; idempotencyKey: string;
     },
-  ): { ok: true; booking: Booking } | { ok: false; error: string; code: string } {
-    const existing = this.db.get<Booking>(
+  ): Promise<{ ok: true; booking: Booking } | { ok: false; error: string; code: string }> {
+    const existing = await this.db.get<Booking>(
       "SELECT * FROM bookings WHERE riderId = ? AND idempotencyKey = ?",
       session.userId,
       input.idempotencyKey,
@@ -275,14 +277,14 @@ export class Api {
     if (existing) return { ok: true, booking: existing };
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const ride = this.getRide(input.rideId);
+      const ride = await this.getRide(input.rideId);
       if (!ride) return { ok: false, error: "That ride no longer exists.", code: "NOT_FOUND" };
 
-      const user = this.db.get<User>("SELECT * FROM users WHERE id = ?", session.userId);
-      const onRide = this.listBookingsForRide(ride.id);
-      const others = this.db
+      const user = await this.db.get<User>("SELECT * FROM users WHERE id = ?", session.userId);
+      const onRide = await this.listBookingsForRide(ride.id);
+      const others = await this.db
         .all<{ departureAt: string; status: Booking["status"] }>(
-          `SELECT r.departureAt AS departureAt, b.status AS status
+          `SELECT r.departureAt AS "departureAt", b.status AS status
              FROM bookings b JOIN rides r ON r.id = b.rideId
             WHERE b.riderId = ? AND b.rideId != ?`,
           session.userId,
@@ -301,11 +303,11 @@ export class Api {
       );
       if (!check.ok) return { ok: false, error: check.error.message, code: check.error.code };
 
-      const claimed = this.db.claimSeats(ride.id, ride.rowVersion, check.value.seatsAfter);
+      const claimed = await this.db.claimSeats(ride.id, ride.rowVersion, check.value.seatsAfter);
       if (!claimed) continue; // somebody else got there first — re-read and retry
 
       const id = newId();
-      this.db.run(
+      await this.db.run(
         `INSERT INTO bookings (id, rideId, riderId, boardZoneId, alightZoneId, seats, status,
                                amount, settlementMode, counterfactualMode, idempotencyKey,
                                rowVersion, createdAt)
@@ -314,8 +316,8 @@ export class Api {
         ride.costSharePerSeat * input.seats, input.settlementMode,
         input.counterfactualMode, input.idempotencyKey, new Date().toISOString(),
       );
-      this.db.audit(session.userId, "booking", id, "request");
-      return { ok: true, booking: this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", id)! };
+      await this.db.audit(session.userId, "booking", id, "request");
+      return { ok: true, booking: (await this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", id))! };
     }
 
     return { ok: false, error: "That seat just went.", code: "SEAT_TAKEN" };
@@ -326,23 +328,23 @@ export class Api {
     bookingId: Id,
     driverId: Id,
   ): Promise<{ ok: true; value: Booking } | { ok: false; error: { message: string } }> {
-    const booking = this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
+    const booking = await this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
     if (!booking) return { ok: false, error: { message: "That request no longer exists." } };
-    const ride = this.getRide(booking.rideId);
+    const ride = await this.getRide(booking.rideId);
     if (!ride) return { ok: false, error: { message: "That ride no longer exists." } };
     if (ride.driverId !== driverId) return { ok: false, error: { message: "That is not your ride." } };
     if (booking.status !== "requested") {
       return { ok: false, error: { message: "That request has already been answered." } };
     }
 
-    const { changes } = this.db.run(
+    const { changes } = await this.db.run(
       "UPDATE bookings SET status = 'confirmed', rowVersion = rowVersion + 1 WHERE id = ? AND rowVersion = ?",
       bookingId,
       booking.rowVersion,
     );
     if (changes !== 1) return { ok: false, error: { message: "That request just changed." } };
-    this.db.audit(driverId, "booking", bookingId, "accept");
-    return { ok: true, value: this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId)! };
+    await this.db.audit(driverId, "booking", bookingId, "accept");
+    return { ok: true, value: (await this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId))! };
   }
 
   /**
@@ -355,36 +357,36 @@ export class Api {
     bookingId: Id,
     driverId: Id,
   ): Promise<{ ok: true; value: Booking } | { ok: false; error: { message: string } }> {
-    const booking = this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
+    const booking = await this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
     if (!booking) return { ok: false, error: { message: "That request no longer exists." } };
-    const ride = this.getRide(booking.rideId);
+    const ride = await this.getRide(booking.rideId);
     if (!ride) return { ok: false, error: { message: "That ride no longer exists." } };
     if (ride.driverId !== driverId) return { ok: false, error: { message: "That is not your ride." } };
 
-    return this.db.transaction(() => {
-      this.db.run(
+    return await this.db.transaction(async () => {
+      await this.db.run(
         "UPDATE bookings SET status = 'declined', rowVersion = rowVersion + 1 WHERE id = ?",
         bookingId,
       );
       // Give the seat back, so somebody else can have it.
-      const remaining = this.listBookingsForRide(ride.id);
-      this.db.run(
+      const remaining = await this.listBookingsForRide(ride.id);
+      await this.db.run(
         "UPDATE rides SET seatsAvailable = ?, status = CASE WHEN status = 'full' THEN 'published' ELSE status END, rowVersion = rowVersion + 1 WHERE id = ?",
         computeSeatsAvailable(ride.seatsTotal, remaining),
         ride.id,
       );
-      this.db.audit(driverId, "booking", bookingId, "decline");
+      await this.db.audit(driverId, "booking", bookingId, "decline");
       return {
         ok: true as const,
-        value: this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId)!,
+        value: (await this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId))!,
       };
     });
   }
 
   /** Bookings awaiting this driver's answer, across all their rides. */
-  pendingForDriver(driverId: Id): readonly (Booking & { riderName: string; departureAt: string })[] {
-    return this.db.all(
-      `SELECT b.*, u.displayName AS riderName, r.departureAt AS departureAt
+  async pendingForDriver(driverId: Id): Promise<readonly (Booking & { riderName: string; departureAt: string })[]> {
+    return await this.db.all(
+      `SELECT b.*, u.displayName AS "riderName", r.departureAt AS "departureAt"
          FROM bookings b
          JOIN rides r ON r.id = b.rideId
          JOIN users u ON u.id = b.riderId
@@ -395,41 +397,41 @@ export class Api {
   }
 
   /** Recomputed from bookings, never trusted from the row. */
-  seatsAvailable(rideId: string): number {
-    const ride = this.getRide(rideId);
+  async seatsAvailable(rideId: string): Promise<number> {
+    const ride = await this.getRide(rideId);
     if (!ride) return 0;
-    return computeSeatsAvailable(ride.seatsTotal, this.listBookingsForRide(rideId));
+    return computeSeatsAvailable(ride.seatsTotal, await this.listBookingsForRide(rideId));
   }
 
-  completeTrip(session: Session, bookingId: string): { ok: boolean; error?: string } {
-    return this.db.transaction(() => {
-      const booking = this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
+  async completeTrip(session: Session, bookingId: string): Promise<{ ok: boolean; error?: string }> {
+    return await this.db.transaction(async () => {
+      const booking = await this.db.get<Booking>("SELECT * FROM bookings WHERE id = ?", bookingId);
       if (!booking) return { ok: false, error: "No such booking." };
-      const ride = this.getRide(booking.rideId);
+      const ride = await this.getRide(booking.rideId);
       if (!ride) return { ok: false, error: "No such ride." };
       if (booking.riderId !== session.userId && ride.driverId !== session.userId) {
         return { ok: false, error: "That is not your trip." };
       }
 
-      this.db.run("UPDATE bookings SET status = 'completed', rowVersion = rowVersion + 1 WHERE id = ?", bookingId);
+      await this.db.run("UPDATE bookings SET status = 'completed', rowVersion = rowVersion + 1 WHERE id = ?", bookingId);
       // UNIQUE(bookingId) makes this idempotent at the storage layer: completing
       // twice cannot double the credit.
-      this.db.run(
+      await this.db.run(
         `INSERT OR IGNORE INTO ledger (id, bookingId, fromUserId, toUserId, amount, createdAt)
          VALUES (?, ?, ?, ?, ?, ?)`,
         newId(), bookingId, booking.riderId, ride.driverId, booking.amount,
         new Date().toISOString(),
       );
-      this.db.audit(session.userId, "booking", bookingId, "complete");
+      await this.db.audit(session.userId, "booking", bookingId, "complete");
       return { ok: true };
     });
   }
 
-  recordZeroResult(session: Session, q: {
+  async recordZeroResult(session: Session, q: {
     originZoneId: string; destinationZoneId: string; targetTime: string;
     windowMinutes: number; seats: number; alert: boolean;
-  }): void {
-    this.db.run(
+  }): Promise<void> {
+    await this.db.run(
       `INSERT INTO zero_result_searches
          (id, searcherId, originZoneId, destinationZoneId, targetTime, windowMinutes, seats, at, convertedToStandingDemand)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -437,7 +439,7 @@ export class Api {
       q.windowMinutes, q.seats, new Date().toISOString(), q.alert ? 1 : 0,
     );
     if (q.alert) {
-      this.db.run(
+      await this.db.run(
         `INSERT INTO standing_demand
            (id, riderId, originZoneId, destinationZoneId, targetTime, windowMinutes, createdAt, isActive)
          VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,

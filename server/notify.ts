@@ -63,8 +63,8 @@ export class Notifier {
     return this.pushEnabled;
   }
 
-  subscribe(userId: string, sub: { endpoint: string; keys: { p256dh: string; auth: string } }): void {
-    this.db.run(
+  async subscribe(userId: string, sub: { endpoint: string; keys: { p256dh: string; auth: string } }): Promise<void> {
+    await this.db.run(
       `INSERT INTO push_subscriptions (id, userId, endpoint, p256dh, auth, createdAt)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(endpoint) DO UPDATE SET userId = excluded.userId`,
@@ -86,13 +86,13 @@ export class Notifier {
    * buzz at six in the morning.
    */
   async send(n: OutgoingNotification): Promise<boolean> {
-    const already = this.db.get<{ id: string }>(
+    const already = await this.db.get<{ id: string }>(
       "SELECT id FROM sent_notifications WHERE id = ?",
       n.id,
     );
     if (already) return false;
 
-    this.db.run(
+    await this.db.run(
       "INSERT INTO sent_notifications (id, userId, kind, at) VALUES (?, ?, ?, ?)",
       n.id,
       n.userId,
@@ -106,7 +106,7 @@ export class Notifier {
 
   private async push(n: OutgoingNotification): Promise<void> {
     if (!this.pushEnabled) return;
-    const subs = this.db.all<{ id: string; endpoint: string; p256dh: string; auth: string }>(
+    const subs = await this.db.all<{ id: string; endpoint: string; p256dh: string; auth: string }>(
       "SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE userId = ?",
       n.userId,
     );
@@ -124,7 +124,7 @@ export class Notifier {
           // colleague uninstalled, cleared data, or revoked permission. Keeping
           // it would mean retrying a dead endpoint forever.
           if (status === 404 || status === 410) {
-            this.db.run("DELETE FROM push_subscriptions WHERE id = ?", s.id);
+            await this.db.run("DELETE FROM push_subscriptions WHERE id = ?", s.id);
           } else {
             console.error("push failed:", status ?? e);
           }
@@ -135,7 +135,7 @@ export class Notifier {
 
   private async email(n: OutgoingNotification): Promise<void> {
     if (!this.mailer.enabled) return;
-    const user = this.db.get<{ email: string }>(
+    const user = await this.db.get<{ email: string }>(
       "SELECT email FROM users WHERE id = ?",
       n.userId,
     );

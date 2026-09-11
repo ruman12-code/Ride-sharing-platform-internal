@@ -112,22 +112,38 @@ way.
 
 ## 3. Where the data physically is
 
-**During the pilot:** a single file (`carpool.db`) on one server that Ruman
-controls, running the pilot software. Not on anyone's laptop, not in a shared
-drive, not in a spreadsheet anyone can open.
+**During the pilot:** a managed Postgres database run by Neon, in their
+Singapore region. The app itself runs on Render, also in Singapore. Not on
+anyone's laptop, not in a shared drive, not in a spreadsheet anyone can open.
 
-**In transit:** encrypted with HTTPS. The app refuses to serve over an
-unencrypted connection at all — it binds to the local machine and prints an
-error rather than sending sign-in codes across the office network in the clear.
+This changed, and the change is worth stating plainly rather than leaving you to
+discover it. It used to be a single file on a machine Ruman kept switched on.
+That was simpler to describe and worse in every practical way: a free hosting
+platform gives you no disk that survives a restart, so the choice was between a
+machine in somebody's flat — down whenever it was unplugged, with the pilot's
+entire data on one unbacked drive — and a database run by people who do this
+professionally. **The cost of that choice is that two companies you have not
+chosen now hold this data.** They are bound by their own terms rather than by a
+promise from a colleague, and neither is in Bangladesh.
 
-**Backups:** copies of that one file, held by Ruman, deleted when the pilot ends.
+If that is the part you object to, it is a reasonable thing to object to, and
+not using the app is a complete answer.
+
+**In transit:** encrypted with HTTPS, end to end — your phone to Render, and
+Render to Neon. The app refuses to serve over an unencrypted connection at all.
+
+**Backups:** Neon keeps its own point-in-time history. Ruman takes a monthly
+copy, held by him, deleted when the pilot ends.
 
 ### What is not true, and why it matters that I say so
 
-- The database file itself is **not encrypted at rest** during the pilot. Anyone
-  with administrator access to that server could read it. That is one person
-  today. In the organisational deployment this moves into the company's own
-  Microsoft 365 tenant, where encryption at rest is the platform's job.
+- The data is **not end-to-end encrypted**. Neon can technically read what is
+  stored, as any database host can; encryption at rest protects the disks it
+  sits on, not the contents from the operator. In the organisational deployment
+  this moves into the company's own Microsoft 365 tenant, which replaces a
+  third party's terms with the employer's own.
+- Ruman, as administrator, can read everything in the database. That was true
+  before this move and is still true.
 - The pilot has **no formal backup rotation or disaster recovery.** If the
   server is lost, recent data is lost with it. That is acceptable for a trial
   and would not be for a production system.

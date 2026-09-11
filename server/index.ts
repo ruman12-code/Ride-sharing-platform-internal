@@ -23,7 +23,24 @@ import { Notifier, notifications } from "./notify.js";
  */
 
 const PORT = Number(process.env["PORT"] ?? 8080);
-const DB_PATH = process.env["DB_PATH"] ?? join(process.cwd(), "carpool.db");
+/**
+ * Where the data lives.
+ *
+ * A Postgres connection string — from Neon, Supabase, or anything else that
+ * speaks Postgres. There is no default: a server that quietly starts against
+ * the wrong database is worse than one that refuses to start at all, and the
+ * failure would not show up until a colleague's ride went missing.
+ */
+const DATABASE_URL = process.env["DATABASE_URL"] ?? "";
+if (!DATABASE_URL) {
+  console.error(
+    "DATABASE_URL is not set.\n" +
+      "Refusing to start: there is nowhere to keep anything.\n" +
+      "  Create a free Postgres at neon.tech, then:\n" +
+      "  DATABASE_URL='postgresql://...' node dist-server/server/index.js",
+  );
+  process.exit(1);
+}
 /**
  * Where the built browser app lives.
  *
@@ -101,7 +118,7 @@ if (!ADMIN_EMAIL) {
   process.exit(1);
 }
 
-const db = new Db(DB_PATH);
+const db = new Db(DATABASE_URL);
 const api = new Api(db);
 /**
  * Employer domains that may NOT be used to register.
@@ -224,13 +241,13 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
 
     try {
       if (url.pathname.startsWith("/api/")) {
-        const session: Session | undefined = api.sessionFor(cookie(req));
+        const session: Session | undefined = await api.sessionFor(cookie(req));
 
         // Open endpoints: asking for access, and redeeming a code.
         if (url.pathname === "/api/register" && req.method === "POST") {
           const b = await body(req);
           const email = String(b["email"] ?? "").trim().toLowerCase();
-          const result = accounts.register({
+          const result = await accounts.register({
             email,
             displayName: String(b["displayName"] ?? ""),
             ...(b["officialName"] ? { officialName: String(b["officialName"]) } : {}),
@@ -241,14 +258,14 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           // reply is composed and never awaited into it: a mail server that is
           // slow or down must not make registration look like it failed.
           if (result.ok) {
-            const admin = db.get<{ id: string }>(
+            const admin = await db.get<{ id: string }>(
               "SELECT id FROM users WHERE role = 'admin' AND status = 'approved' ORDER BY createdAt LIMIT 1",
             );
             // Matched on email, which is unique. Matching on display name
             // would pick the wrong colleague the first time two of them share
             // a first name, which in an office of this size is a matter of
             // when rather than whether.
-            const waiting = accounts.pending().find((u) => u.email === email);
+            const waiting = (await accounts.pending()).find((u) => u.email === email);
             if (admin && waiting) {
               void notifier
                 .send(notifications.registrationReceived(admin.id, waiting.id, waiting.displayName))
@@ -276,7 +293,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
               "It works once and lasts 20 minutes.",
           };
 
-          const minted = magicLinks.request(asked);
+          const minted = await magicLinks.request(asked);
           if (minted) {
             const mail = signInLinkEmail(`${APP_URL}/enter?t=${encodeURIComponent(minted.token)}`);
             // Not awaited into the reply: a slow relay must not make the form
@@ -296,7 +313,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         */
         if (url.pathname === "/api/session-from-link" && req.method === "POST") {
           const b = await body(req);
-          const userId = magicLinks.redeem(String(b["token"] ?? ""));
+          const userId = await magicLinks.redeem(String(b["token"] ?? ""));
           if (!userId) {
             return send(401, {
               error:
@@ -304,9 +321,9 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
                 "Ask for a new one — it takes a moment.",
             });
           }
-          const token = api.createSession(userId);
+          const token = await api.createSession(userId);
           res.setHeader("set-cookie", sessionCookie(token));
-          return send(200, api.sessionFor(token));
+          return send(200, await api.sessionFor(token));
         }
 
         // Told to the sign-in screen so the browser can subscribe to push. The
@@ -325,7 +342,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         */
         if (url.pathname === "/api/health") {
           try {
-            db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users");
+            await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users");
             return send(200, { ok: true });
           } catch (e) {
             console.error("health check failed:", e);
@@ -347,7 +364,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           // The code alone identifies the person: it was minted for exactly one
           // of them, so no address is needed or wanted — which is the point,
           // since an invited colleague may not have a usable one.
-          const userId = access.redeemByCode(code, String(b["displayName"] ?? ""));
+          const userId = await access.redeemByCode(code, String(b["displayName"] ?? ""));
           // One message for every failure. Distinguishing "not approved" from
           // "wrong code" would turn this into a way of finding out who works here.
           if (!userId) {
@@ -355,9 +372,9 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
               error: "That code is not valid. Ask the administrator for a new one.",
             });
           }
-          const token = api.createSession(userId);
+          const token = await api.createSession(userId);
           res.setHeader("set-cookie", sessionCookie(token));
-          return send(200, api.sessionFor(token));
+          return send(200, await api.sessionFor(token));
         }
 
         if (url.pathname === "/api/me") {
@@ -365,7 +382,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           // Whether a contact detail is on file, never the detail itself. The
           // app needs to know to ask for one; nothing needs it echoed back on
           // every page load.
-          const row = db.get<{ contactValue: string | null }>(
+          const row = await db.get<{ contactValue: string | null }>(
             "SELECT contactValue FROM users WHERE id = ?",
             session.userId,
           );
@@ -375,30 +392,30 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         if (!session) return send(401, { error: "Not signed in." });
 
         if (url.pathname === "/api/pending-requests" && req.method === "GET") {
-          return send(200, { requests: api.pendingForDriver(session.userId) });
+          return send(200, { requests: await api.pendingForDriver(session.userId) });
         }
         if (url.pathname === "/api/people" && req.method === "GET") {
-          return send(200, { people: api.listPeople() });
+          return send(200, { people: await api.listPeople() });
         }
         if (url.pathname === "/api/rides" && req.method === "GET") {
-          return send(200, { rides: api.listRides() });
+          return send(200, { rides: await api.listRides() });
         }
         if (url.pathname === "/api/rides" && req.method === "POST") {
           const b = await body(req);
-          const out = api.publishRide(session, b as never, Number(b["cap"] ?? 1e9));
+          const out = await api.publishRide(session, b as never, Number(b["cap"] ?? 1e9));
           return out.ok ? send(201, out.ride) : send(400, { error: out.error });
         }
         if (url.pathname === "/api/bookings" && req.method === "GET") {
-          return send(200, { bookings: api.listBookingsForRider(session.userId) });
+          return send(200, { bookings: await api.listBookingsForRider(session.userId) });
         }
         if (url.pathname === "/api/bookings" && req.method === "POST") {
-          const out = api.requestSeat(session, (await body(req)) as never);
+          const out = await api.requestSeat(session, (await body(req)) as never);
           if (!out.ok) return send(409, { error: out.error, code: out.code });
 
           // The reason this product exists. Without it the driver finds out
           // only if they happen to open the app, which is exactly how the
           // spreadsheet failed.
-          const ride = api.getRide(out.booking.rideId);
+          const ride = await api.getRide(out.booking.rideId);
           if (ride) {
             void notifier.send(
               notifications.seatRequested(
@@ -417,7 +434,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           const b = await body(req);
           const out = await api.acceptBooking(String(b["bookingId"] ?? ""), session.userId);
           if (!out.ok) return send(400, { error: out.error.message });
-          const ride = api.getRide(out.value.rideId);
+          const ride = await api.getRide(out.value.rideId);
           if (ride) {
             void notifier.send(
               notifications.seatAccepted(
@@ -435,7 +452,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           const b = await body(req);
           const out = await api.declineBooking(String(b["bookingId"] ?? ""), session.userId);
           if (!out.ok) return send(400, { error: out.error.message });
-          const ride = api.getRide(out.value.rideId);
+          const ride = await api.getRide(out.value.rideId);
           if (ride) {
             // Never says who declined, or why.
             void notifier.send(
@@ -450,11 +467,11 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         }
         if (url.pathname === "/api/complete" && req.method === "POST") {
           const b = await body(req);
-          const out = api.completeTrip(session, String(b["bookingId"] ?? ""));
+          const out = await api.completeTrip(session, String(b["bookingId"] ?? ""));
           return out.ok ? send(200, { ok: true }) : send(400, { error: out.error });
         }
         if (url.pathname === "/api/zero-result" && req.method === "POST") {
-          api.recordZeroResult(session, (await body(req)) as never);
+          await api.recordZeroResult(session, (await body(req)) as never);
           return send(204, null);
         }
         if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
@@ -465,7 +482,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           if (!b.endpoint || !b.keys?.p256dh || !b.keys.auth) {
             return send(400, { error: "Incomplete subscription." });
           }
-          notifier.subscribe(session.userId, {
+          await notifier.subscribe(session.userId, {
             endpoint: b.endpoint,
             keys: { p256dh: b.keys.p256dh, auth: b.keys.auth },
           });
@@ -473,19 +490,19 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         }
         if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
           const b = await body(req);
-          db.run("DELETE FROM push_subscriptions WHERE endpoint = ? AND userId = ?",
+          await db.run("DELETE FROM push_subscriptions WHERE endpoint = ? AND userId = ?",
             String(b["endpoint"] ?? ""), session.userId);
           return send(200, { ok: true });
         }
 
         if (url.pathname === "/api/contact" && req.method === "PUT") {
           const b = await body(req);
-          api.setContact(session.userId, String(b["kind"] ?? "phone"), String(b["value"] ?? ""));
+          await api.setContact(session.userId, String(b["kind"] ?? "phone"), String(b["value"] ?? ""));
           return send(200, { ok: true });
         }
         if (url.pathname === "/api/contact" && req.method === "POST") {
           const b = await body(req);
-          const revealed = api.revealContact(session, String(b["bookingId"] ?? ""));
+          const revealed = await api.revealContact(session, String(b["bookingId"] ?? ""));
           return revealed
             ? send(200, revealed)
             : send(403, { error: "Contact details are shared once a driver accepts." });
@@ -497,12 +514,12 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           if (url.pathname === "/api/admin/pending" && req.method === "GET") {
             // From accounts, so the administrator sees the optional official
             // name and department a colleague gave them to be recognised by.
-            return send(200, { pending: accounts.pending() });
+            return send(200, { pending: await accounts.pending() });
           }
           if (url.pathname === "/api/admin/approve" && req.method === "POST") {
             const b = await body(req);
             const userId = String(b["userId"] ?? "");
-            const issued = access.approve(userId, session.userId);
+            const issued = await access.approve(userId, session.userId);
             if (!issued) return send(404, { error: "No such request." });
             // Approval nobody is told about is indistinguishable from being
             // refused. They have never signed in, so this reaches them by
@@ -514,11 +531,11 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           }
           if (url.pathname === "/api/admin/invite" && req.method === "POST") {
             const b = await body(req);
-            return send(200, access.invite(String(b["displayName"] ?? ""), session.userId));
+            return send(200, await access.invite(String(b["displayName"] ?? ""), session.userId));
           }
           if (url.pathname === "/api/admin/suspend" && req.method === "POST") {
             const b = await body(req);
-            access.suspend(String(b["userId"] ?? ""), session.userId);
+            await access.suspend(String(b["userId"] ?? ""), session.userId);
             return send(200, { ok: true });
           }
         }
@@ -549,6 +566,21 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
       else res.end();
     }
   })();
+};
+
+/**
+ * The database, named without its password.
+ *
+ * The connection string carries credentials, and a startup banner is the single
+ * most-screenshotted, most-pasted-into-chat piece of output this app produces.
+ */
+const describeDb = (url: string): string => {
+  try {
+    const u = new URL(url);
+    return `${u.hostname}${u.pathname}`;
+  } catch {
+    return "(unparseable DATABASE_URL)";
+  }
 };
 
 const server = OWN_TLS
@@ -603,13 +635,13 @@ const SCHEDULER_TICK_MS = 5 * 60_000;
  */
 const AUTO_COMPLETE_AFTER_MS = 4 * 3_600_000;
 
-const runReconfirmSweep = (): void => {
+const runReconfirmSweep = async (): Promise<void> => {
   try {
     const now = Date.now();
     const soon = new Date(now + RECONFIRM_WINDOW_MS).toISOString();
     const nowIso = new Date(now).toISOString();
 
-    const due = db.all<{
+    const due = await db.all<{
       rideId: string;
       driverId: string;
       riderId: string;
@@ -651,10 +683,10 @@ const runReconfirmSweep = (): void => {
  * still worth doing — the notification below does that, and a colleague who
  * answers "no" is the signal worth having — but the count does not wait on it.
  */
-const runAutoCompleteSweep = (): void => {
+const runAutoCompleteSweep = async (): Promise<void> => {
   try {
     const cutoff = new Date(Date.now() - AUTO_COMPLETE_AFTER_MS).toISOString();
-    const due = db.all<{
+    const due = await db.all<{
       id: string;
       rideId: string;
       driverId: string;
@@ -674,7 +706,7 @@ const runAutoCompleteSweep = (): void => {
       cutoff,
     );
     for (const row of due) {
-      db.run(
+      await db.run(
         "UPDATE bookings SET status = 'completed', rowVersion = rowVersion + 1 WHERE id = ? AND status = 'confirmed'",
         row.id,
       );
@@ -688,11 +720,11 @@ const runAutoCompleteSweep = (): void => {
       void notifier
         .send(notifications.didItHappen(row.riderId, row.rideId, row.driverName, time))
         .catch(() => {});
-      db.run(
+      await db.run(
         "UPDATE rides SET status = 'completed', rowVersion = rowVersion + 1 WHERE id = ? AND status IN ('published','full')",
         row.rideId,
       );
-      db.audit("system", "booking", row.id, "auto-complete");
+      await db.audit("system", "booking", row.id, "auto-complete");
     }
     if (due.length > 0) console.log(`auto-completed ${due.length} trip(s)`);
   } catch (e) {
@@ -700,17 +732,30 @@ const runAutoCompleteSweep = (): void => {
   }
 };
 
-setInterval(runReconfirmSweep, SCHEDULER_TICK_MS).unref();
-setInterval(runAutoCompleteSweep, SCHEDULER_TICK_MS).unref();
-// Once at boot as well: a server that was down over the evening should not wait
-// five minutes to notice that yesterday's trips are over.
-runAutoCompleteSweep();
+setInterval(() => void runReconfirmSweep(), SCHEDULER_TICK_MS).unref();
+setInterval(() => void runAutoCompleteSweep(), SCHEDULER_TICK_MS).unref();
+
+
+/*
+  Migrate before listening, not alongside it.
+
+  Starting the listener first would accept a colleague's request in the window
+  before the tables exist, and answer it with an error that looks like a bug in
+  the app rather than a server that is not ready yet.
+*/
+await db.migrate();
+
+// Once the tables exist, and only then: a server that was down over the evening
+// should not wait five minutes to notice that yesterday's trips are over. This
+// used to run before the migration and failed on every boot against a database
+// that had not been set up yet.
+await runAutoCompleteSweep();
 
 server.listen(PORT, HOST, () => {
   const scheme = OWN_TLS ? "https" : "http";
   console.log(`Ekpothe — pilot server`);
   console.log(`  ${scheme}://${HOST === "0.0.0.0" ? "0.0.0.0" : HOST}:${PORT}`);
-  console.log(`  database:   ${DB_PATH}`);
+  console.log(`  database:   ${describeDb(DATABASE_URL)}`);
   /*
     Reported per channel, not as one verdict.
 

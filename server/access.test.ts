@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Db } from "./db.js";
+import type { Db } from "./db.js";
+import { freshDb, hasPostgres, type TestDb } from "./test-db.js";
 import { Access, type ApprovalResult, CODE_VALID_DAYS, generateCode } from "./access.js";
 import { MagicLinks } from "./magic-link.js";
 
@@ -14,18 +12,17 @@ import { MagicLinks } from "./magic-link.js";
  * mint a code rather than assume an email will do.
  */
 
-let dir: string;
+let handle: TestDb;
 let db: Db;
 let access: Access;
 
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "access-"));
-  db = new Db(join(dir, "t.db"));
+beforeEach(async () => {
+  handle = await freshDb();
+  db = handle.db;
   access = new Access(db);
 });
-afterEach(() => {
-  db.close?.();
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await handle.drop();
 });
 
 const codeOf = (r: ApprovalResult | undefined): string => {
@@ -33,8 +30,8 @@ const codeOf = (r: ApprovalResult | undefined): string => {
   return r.code;
 };
 
-describe("the code alphabet", () => {
-  it("avoids the characters people mishear and mistype", () => {
+describe.skipIf(!hasPostgres)("the code alphabet", () => {
+  it("avoids the characters people mishear and mistype", async () => {
     // Read aloud down a corridor or over the phone: O/0 and I/1 are the pairs
     // that come back wrong.
     for (let i = 0; i < 200; i++) {
@@ -42,79 +39,79 @@ describe("the code alphabet", () => {
     }
   });
 
-  it("does not repeat itself", () => {
+  it("does not repeat itself", async () => {
     const seen = new Set(Array.from({ length: 500 }, () => generateCode()));
     expect(seen.size).toBe(500);
   });
 });
 
-describe("inviting a colleague a link cannot reach", () => {
-  it("mints a code that admits them once", () => {
-    const { code, userId } = access.invite("Nusrat", "admin");
+describe.skipIf(!hasPostgres)("inviting a colleague a link cannot reach", () => {
+  it("mints a code that admits them once", async () => {
+    const { code, userId } = await access.invite("Nusrat", "admin");
     expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/);
-    expect(access.redeemByCode(code)).toBe(userId);
+    expect(await access.redeemByCode(code)).toBe(userId);
   });
 
-  it("consumes the code, so a forwarded code is useless", () => {
-    const { code } = access.invite("Nusrat", "admin");
-    expect(access.redeemByCode(code)).toBeDefined();
-    expect(access.redeemByCode(code)).toBeUndefined();
+  it("consumes the code, so a forwarded code is useless", async () => {
+    const { code } = await access.invite("Nusrat", "admin");
+    expect(await access.redeemByCode(code)).toBeDefined();
+    expect(await access.redeemByCode(code)).toBeUndefined();
   });
 
-  it("is case-insensitive, because people retype what they were told", () => {
-    const { code, userId } = access.invite("Nusrat", "admin");
-    expect(access.redeemByCode(code.toLowerCase())).toBe(userId);
+  it("is case-insensitive, because people retype what they were told", async () => {
+    const { code, userId } = await access.invite("Nusrat", "admin");
+    expect(await access.redeemByCode(code.toLowerCase())).toBe(userId);
   });
 
-  it("lets them choose the name colleagues will see", () => {
-    const { code, userId } = access.invite("Nusrat", "admin");
-    access.redeemByCode(code, "Nusrat Jahan");
-    const row = db.get<{ displayName: string }>("SELECT displayName FROM users WHERE id = ?", userId)!;
+  it("lets them choose the name colleagues will see", async () => {
+    const { code, userId } = await access.invite("Nusrat", "admin");
+    await access.redeemByCode(code, "Nusrat Jahan");
+    const row = await db.get<{ displayName: string }>("SELECT displayName FROM users WHERE id = ?", userId)!;
     expect(row.displayName).toBe("Nusrat Jahan");
   });
 
-  it("refuses a wrong code", () => {
-    access.invite("Nusrat", "admin");
-    expect(access.redeemByCode("AAAAAA")).toBeUndefined();
+  it("refuses a wrong code", async () => {
+    await access.invite("Nusrat", "admin");
+    expect(await access.redeemByCode("AAAAAA")).toBeUndefined();
   });
 
-  it("refuses anyone suspended since the code was issued", () => {
-    const { code, userId } = access.invite("Nusrat", "admin");
-    access.suspend(userId, "admin");
-    expect(access.redeemByCode(code)).toBeUndefined();
+  it("refuses anyone suspended since the code was issued", async () => {
+    const { code, userId } = await access.invite("Nusrat", "admin");
+    await access.suspend(userId, "admin");
+    expect(await access.redeemByCode(code)).toBeUndefined();
   });
 
-  it("expires a code after a week", () => {
-    const { code, userId } = access.invite("Nusrat", "admin");
-    db.run(
+  it("expires a code after a week", async () => {
+    const { code, userId } = await access.invite("Nusrat", "admin");
+    await db.run(
       "UPDATE invite_codes SET expiresAt = ? WHERE userId = ?",
       new Date(Date.now() - 1000).toISOString(),
       userId,
     );
-    expect(access.redeemByCode(code)).toBeUndefined();
+    expect(await access.redeemByCode(code)).toBeUndefined();
     expect(CODE_VALID_DAYS).toBe(7);
   });
 
-  it("stores only a hash — a copy of the database hands nobody a working code", () => {
-    const { code } = access.invite("Nusrat", "admin");
-    const rows = db.all<{ codeHash: string }>("SELECT codeHash FROM invite_codes");
+  it("stores only a hash — a copy of the database hands nobody a working code", async () => {
+    const { code } = await access.invite("Nusrat", "admin");
+    const rows = await db.all<{ codeHash: string }>("SELECT codeHash FROM invite_codes");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.codeHash).not.toContain(code);
     expect(rows[0]!.codeHash).toHaveLength(64);
   });
 
-  it("invalidates an earlier unused code when re-approving", () => {
-    const { userId } = access.invite("Nusrat", "admin");
-    const second = codeOf(access.approve(userId, "admin"));
+  it("invalidates an earlier unused code when re-approving", async () => {
+    const { userId } = await access.invite("Nusrat", "admin");
+    const second = codeOf(await access.approve(userId, "admin"));
     // The first is gone; only the newest code works.
-    expect(access.redeemByCode(second)).toBe(userId);
+    expect(await access.redeemByCode(second)).toBe(userId);
   });
 });
 
-describe("approving somebody who gave a real address", () => {
-  const register = (email: string) => {
+describe.skipIf(!hasPostgres)("approving somebody who gave a real address", () => {
+  const register = async (email: string) => {
     const id = "u-1";
-    db.run(
+    await db.run(
       "INSERT INTO users (id, displayName, email, status, createdAt) VALUES (?, 'Nusrat', ?, 'pending', ?)",
       id,
       email,
@@ -123,48 +120,48 @@ describe("approving somebody who gave a real address", () => {
     return id;
   };
 
-  it("mints no code — they sign in by emailed link", () => {
-    const id = register("nusrat@personal.com");
-    expect(access.approve(id, "admin")).toEqual({ kind: "link" });
-    expect(db.all("SELECT id FROM invite_codes WHERE userId = ?", id)).toHaveLength(0);
+  it("mints no code — they sign in by emailed link", async () => {
+    const id = await register("nusrat@personal.com");
+    expect(await access.approve(id, "admin")).toEqual({ kind: "link" });
+    expect(await db.all("SELECT id FROM invite_codes WHERE userId = ?", id)).toHaveLength(0);
   });
 
-  it("marks them approved and records who did it", () => {
-    const id = register("nusrat@personal.com");
-    access.approve(id, "admin-1");
-    const row = db.get<{ status: string; approvedBy: string }>(
+  it("marks them approved and records who did it", async () => {
+    const id = await register("nusrat@personal.com");
+    await access.approve(id, "admin-1");
+    const row = await db.get<{ status: string; approvedBy: string }>(
       "SELECT status, approvedBy FROM users WHERE id = ?",
       id,
     )!;
     expect(row).toMatchObject({ status: "approved", approvedBy: "admin-1" });
   });
 
-  it("returns nothing for a user who does not exist", () => {
-    expect(access.approve("no-such-user", "admin")).toBeUndefined();
+  it("returns nothing for a user who does not exist", async () => {
+    expect(await access.approve("no-such-user", "admin")).toBeUndefined();
   });
 
-  it("writes an audit row", () => {
-    const id = register("nusrat@personal.com");
-    access.approve(id, "admin");
-    const actions = db.all<{ action: string }>("SELECT action FROM audit_log").map((a) => a.action);
+  it("writes an audit row", async () => {
+    const id = await register("nusrat@personal.com");
+    await access.approve(id, "admin");
+    const actions = (await db.all<{ action: string }>("SELECT action FROM audit_log")).map((a) => a.action);
     expect(actions).toContain("approve");
   });
 });
 
-describe("suspending", () => {
-  it("ends access immediately, not at the next sign-in", () => {
-    const { code, userId } = access.invite("Nusrat", "admin");
-    access.redeemByCode(code);
-    db.run(
+describe.skipIf(!hasPostgres)("suspending", () => {
+  it("ends access immediately, not at the next sign-in", async () => {
+    const { code, userId } = await access.invite("Nusrat", "admin");
+    await access.redeemByCode(code);
+    await db.run(
       "INSERT INTO sessions (token, userId, createdAt, expiresAt) VALUES (?, ?, ?, ?)",
       "tok", userId, new Date().toISOString(), "2099-01-01T00:00:00Z",
     );
 
-    access.suspend(userId, "admin");
+    await access.suspend(userId, "admin");
 
     // The open session is destroyed, not left to lapse.
-    expect(db.all("SELECT token FROM sessions WHERE userId = ?", userId)).toHaveLength(0);
-    const row = db.get<{ status: string; isSuspended: number }>(
+    expect(await db.all("SELECT token FROM sessions WHERE userId = ?", userId)).toHaveLength(0);
+    const row = await db.get<{ status: string; isSuspended: number }>(
       "SELECT status, isSuspended FROM users WHERE id = ?",
       userId,
     )!;
@@ -172,23 +169,23 @@ describe("suspending", () => {
     expect(row).toEqual({ status: "suspended", isSuspended: 1 });
   });
 
-  it("kills a sign-in link that is already in their inbox", () => {
-    const { userId } = access.invite("Nusrat", "admin");
-    db.run("UPDATE users SET email = 'nusrat@personal.com', status = 'approved' WHERE id = ?", userId);
+  it("kills a sign-in link that is already in their inbox", async () => {
+    const { userId } = await access.invite("Nusrat", "admin");
+    await db.run("UPDATE users SET email = 'nusrat@personal.com', status = 'approved' WHERE id = ?", userId);
     const links = new MagicLinks(db);
-    const { token } = links.request("nusrat@personal.com")!;
+    const { token } = await links.request("nusrat@personal.com")!;
 
-    access.suspend(userId, "admin");
+    await access.suspend(userId, "admin");
 
     // Otherwise a mail sent a minute ago is a way back in for somebody who has
     // just been removed.
-    expect(links.redeem(token)).toBeUndefined();
+    expect(await links.redeem(token)).toBeUndefined();
   });
 
-  it("writes an audit row", () => {
-    const { userId } = access.invite("Nusrat", "admin");
-    access.suspend(userId, "admin");
-    const actions = db.all<{ action: string }>("SELECT action FROM audit_log").map((a) => a.action);
+  it("writes an audit row", async () => {
+    const { userId } = await access.invite("Nusrat", "admin");
+    await access.suspend(userId, "admin");
+    const actions = (await db.all<{ action: string }>("SELECT action FROM audit_log")).map((a) => a.action);
     expect(actions).toContain("suspend");
   });
 });

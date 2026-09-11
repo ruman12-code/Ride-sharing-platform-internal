@@ -73,9 +73,9 @@ export class Access {
    * colleague. The placeholder address exists only to satisfy the unique index
    * and is never shown, never emailed, and never treated as contactable.
    */
-  invite(displayName: string, adminId: string): { code: string; userId: string } {
+  async invite(displayName: string, adminId: string): Promise<{ code: string; userId: string }> {
     const userId = randomUUID();
-    this.db.run(
+    await this.db.run(
       `INSERT INTO users (id, displayName, email, status, createdAt)
        VALUES (?, ?, ?, 'pending', ?)`,
       userId,
@@ -83,7 +83,7 @@ export class Access {
       `invite:${userId}`,
       new Date().toISOString(),
     );
-    const issued = this.approve(userId, adminId);
+    const issued = await this.approve(userId, adminId);
     // The row was just inserted with no password, so approve always mints a
     // code here. Asserting it rather than assuming keeps the invariant local.
     if (issued?.kind !== "code") throw new Error("invite: expected a code");
@@ -97,8 +97,8 @@ export class Access {
    * minted for exactly one person. A colleague may set the display name they
    * want to be known by at the same time.
    */
-  redeemByCode(code: string, displayName?: string): string | undefined {
-    const rows = this.db.all<{ id: string; userId: string; codeHash: string; salt: string; expiresAt: string }>(
+  async redeemByCode(code: string, displayName?: string): Promise<string | undefined> {
+    const rows = await this.db.all<{ id: string; userId: string; codeHash: string; salt: string; expiresAt: string }>(
       `SELECT c.id, c.userId, c.codeHash, c.salt, c.expiresAt
          FROM invite_codes c JOIN users u ON u.id = c.userId
         WHERE c.usedAt IS NULL AND u.status = 'approved'`,
@@ -109,15 +109,15 @@ export class Access {
       const given = Buffer.from(hashCode(code, row.salt), "hex");
       const want = Buffer.from(row.codeHash, "hex");
       if (given.length === want.length && timingSafeEqual(given, want)) {
-        this.db.run("UPDATE invite_codes SET usedAt = ? WHERE id = ?", now, row.id);
+        await this.db.run("UPDATE invite_codes SET usedAt = ? WHERE id = ?", now, row.id);
         if (displayName?.trim()) {
-          this.db.run(
+          await this.db.run(
             "UPDATE users SET displayName = ? WHERE id = ?",
             displayName.trim().slice(0, 80),
             row.userId,
           );
         }
-        this.db.audit(row.userId, "user", row.userId, "redeem-code");
+        await this.db.audit(row.userId, "user", row.userId, "redeem-code");
         return row.userId;
       }
     }
@@ -131,8 +131,8 @@ export class Access {
    * named somebody already approved. Anything else turns this form into a way
    * of discovering who works here.
    */
-  pending(): readonly { id: string; displayName: string; email: string; createdAt: string }[] {
-    return this.db.all(
+  async pending(): Promise<readonly { id: string; displayName: string; email: string; createdAt: string }[]> {
+    return await this.db.all(
       "SELECT id, displayName, email, createdAt FROM users WHERE status = 'pending' ORDER BY createdAt",
     );
   }
@@ -144,8 +144,8 @@ export class Access {
    * pass on. Only its hash is stored, so it cannot be recovered later and a
    * copy of the database does not hand anybody a working code.
    */
-  approve(userId: string, adminId: string): ApprovalResult | undefined {
-    const user = this.db.get<{ id: string; email: string }>(
+  async approve(userId: string, adminId: string): Promise<ApprovalResult | undefined> {
+    const user = await this.db.get<{ id: string; email: string }>(
       "SELECT id, email FROM users WHERE id = ?",
       userId,
     );
@@ -157,13 +157,13 @@ export class Access {
     // "address" is the `invite:` placeholder that exists to satisfy the unique
     // index and can receive nothing — needs a code.
     if (!user.email.startsWith("invite:")) {
-      this.db.run(
+      await this.db.run(
         "UPDATE users SET status = 'approved', approvedBy = ?, approvedAt = ? WHERE id = ?",
         adminId,
         now0.toISOString(),
         userId,
       );
-      this.db.audit(adminId, "user", userId, "approve");
+      await this.db.audit(adminId, "user", userId, "approve");
       return { kind: "link" };
     }
 
@@ -171,7 +171,7 @@ export class Access {
     const salt = randomBytes(16).toString("hex");
     const now = new Date();
 
-    this.db.run(
+    await this.db.run(
       "UPDATE users SET status = 'approved', approvedBy = ?, approvedAt = ? WHERE id = ?",
       adminId,
       now.toISOString(),
@@ -179,8 +179,8 @@ export class Access {
     );
     // Any earlier unused code stops working: re-approving should not leave two
     // valid ways in.
-    this.db.run("UPDATE invite_codes SET usedAt = ? WHERE userId = ? AND usedAt IS NULL", now.toISOString(), userId);
-    this.db.run(
+    await this.db.run("UPDATE invite_codes SET usedAt = ? WHERE userId = ? AND usedAt IS NULL", now.toISOString(), userId);
+    await this.db.run(
       `INSERT INTO invite_codes (id, userId, codeHash, salt, createdAt, expiresAt)
        VALUES (?, ?, ?, ?, ?, ?)`,
       randomUUID(),
@@ -190,22 +190,22 @@ export class Access {
       now.toISOString(),
       new Date(now.getTime() + CODE_VALID_DAYS * 24 * 3_600_000).toISOString(),
     );
-    this.db.audit(adminId, "user", userId, "approve");
+    await this.db.audit(adminId, "user", userId, "approve");
     return { kind: "code", code };
   }
 
-  suspend(userId: string, adminId: string): void {
+  async suspend(userId: string, adminId: string): Promise<void> {
     // Both columns. `status` is what the doors check and `isSuspended` is what
     // the booking rules check; setting only one leaves somebody who cannot sign
     // in but whose bookings the domain still treats as a colleague in good
     // standing, which is a state nobody would think to look for.
-    this.db.run("UPDATE users SET status = 'suspended', isSuspended = 1 WHERE id = ?", userId);
+    await this.db.run("UPDATE users SET status = 'suspended', isSuspended = 1 WHERE id = ?", userId);
     // Ending access must end it now, not at the next sign-in.
-    this.db.run("DELETE FROM sessions WHERE userId = ?", userId);
+    await this.db.run("DELETE FROM sessions WHERE userId = ?", userId);
     // Any live sign-in link is dead too, or a mail sent a minute ago is a way
     // back in for somebody who has just been removed.
-    this.db.run("UPDATE login_links SET usedAt = ? WHERE userId = ? AND usedAt IS NULL",
+    await this.db.run("UPDATE login_links SET usedAt = ? WHERE userId = ? AND usedAt IS NULL",
       new Date().toISOString(), userId);
-    this.db.audit(adminId, "user", userId, "suspend");
+    await this.db.audit(adminId, "user", userId, "suspend");
   }
 }

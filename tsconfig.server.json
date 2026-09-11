@@ -17,6 +17,7 @@
   "exclude": [
     "**/*.test.ts",
     "**/*.test.tsx",
-    "src/test"
+    "src/test",
+    "server/test-db.ts"
   ]
 }

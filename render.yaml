@@ -1,0 +1,74 @@
+# Render Blueprint for the Ekpothe pilot.
+#
+# Connect this repository in the Render dashboard and it reads this file: no
+# CLI, no Docker, no machine of yours involved. Every push to the branch
+# redeploys.
+#
+# The database is deliberately NOT defined here. Render's own free Postgres
+# expires 30 days after creation and is then deleted, which would take the pilot
+# with it a month in, silently. Use a free Postgres that does not expire — Neon
+# — and paste its connection string in as DATABASE_URL.
+#
+# Everything marked `sync: false` must be set by hand in the dashboard. Those
+# are the secrets, and this file is in git.
+
+services:
+  - type: web
+    name: ekpothe
+    runtime: node
+    plan: free
+    # Singapore is the closest Render region to Dhaka.
+    region: singapore
+    buildCommand: npm ci && npm run build && npm run build:server
+    startCommand: node dist-server/server/index.js
+    # Touches the database rather than only proving the process is alive: a
+    # volume that did not mount or a connection string that is wrong both start
+    # cleanly and fail on the first real request.
+    healthCheckPath: /api/health
+    envVars:
+      # node:sqlite is gone, but Node 22 is still the floor the code is written
+      # against, and pinning it keeps a Render default from moving under us.
+      - key: NODE_VERSION
+        value: "22"
+      # Render terminates TLS at its edge and forwards over its private
+      # network, so the process serves plain HTTP and is told the connection
+      # reached the colleague securely. BIND_HOST is deliberately unset: here
+      # the proxy really is on the other side of a network.
+      - key: TRUST_PROXY
+        value: "1"
+      # Work addresses are refused at registration, so no employer address is
+      # ever stored. See server/accounts.ts.
+      - key: BLOCKED_EMAIL_DOMAINS
+        value: giz.de
+
+      # --- set these in the dashboard -------------------------------------
+      # Postgres, from neon.tech. Not Render's free Postgres: it expires.
+      - key: DATABASE_URL
+        sync: false
+      # The address colleagues actually open. Every sign-in link points here,
+      # so a wrong value means links that go nowhere.
+      - key: APP_URL
+        sync: false
+      # Your own personal address. Registering with it is approved instantly
+      # and as an admin, so you join by the same door as everybody else.
+      - key: ADMIN_EMAIL
+        sync: false
+      # Nobody can sign in without a working mailer. See docs/EMAIL_SETUP.md.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # Push. Generate once with `npm run setup` and never again: every phone
+      # already subscribed is tied to the old key and would go silent.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false

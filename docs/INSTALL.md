@@ -100,7 +100,7 @@ code issued to that one colleague. On a fresh database the server prints a
 one-time admin code for `ADMIN_EMAIL` — use it once to sign in.
 
 Full detail, including what to say to a colleague who asks about their data, is
-in [`HOSTING.md`](HOSTING.md) and [`DATA_SECURITY.md`](DATA_SECURITY.md).
+in [`DEPLOY.md`](DEPLOY.md) and [`DATA_SECURITY.md`](DATA_SECURITY.md).
 
 Full detail, including the API and backups, in
 [`server/README.md`](../server/README.md).
