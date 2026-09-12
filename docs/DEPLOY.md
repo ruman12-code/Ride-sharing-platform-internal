@@ -44,17 +44,28 @@ nowhere else — not into git, not into a chat message.
 
 Nothing to create inside it: the app builds its own tables on first boot.
 
-## 2. Email
+## 2. Email — optional, and skip it for now
 
-Do this before deploying. **Nobody can sign in without it** — the sign-in link
-is the only door.
+This section used to say "do this before deploying, nobody can sign in without
+it". That was true once and it is what cost this pilot three separate launches:
+a host that blocks SMTP, a provider that demanded an SMS that never arrived, and
+then a provider account suspended without warning or explanation.
 
-It goes over HTTPS rather than SMTP, and that is not a preference: Render's free
-web services block outbound ports 25, 465 and 587 as anti-spam policy. On a free
-instance an SMTP connection simply hangs, and the timeout reads exactly like a
-wrong password. `EMAIL_SETUP.md` has the steps.
+**The app no longer needs a mail server at all.** Approving a colleague mints a
+six-character code, the administrator reads it off their own screen, and it goes
+to that colleague however the two of them already talk — WhatsApp, a corridor,
+a phone call. Notifications go by web push, which is HTTPS to Google and is not
+blocked anywhere.
 
-You need two values: `BREVO_API_KEY` and `SMTP_FROM`.
+Set **nothing** here and the app works. Leave `SMTP_HOST`, `SMTP_USER`,
+`SMTP_PASS`, `SMTP_PORT`, `SMTP_FROM` and `BREVO_API_KEY` unset — and delete
+them if they are already there. `SMTP_HOST` in particular is worse than useless
+on Render: the mailer believes it has a working relay, every approval attempts a
+send into a blocked port, and `/api/health` reports email as broken forever.
+
+If you ever do want sign-in links, `EMAIL_SETUP.md` has the steps, and the honest
+prerequisite is a domain of your own. Mail from a freemail address through a
+third-party relay lands in spam often enough that it cannot be the only door.
 
 ## 3. The app
 
@@ -68,9 +79,21 @@ You need two values: `BREVO_API_KEY` and `SMTP_FROM`.
    | `DATABASE_URL` | the Neon string from step 1 |
    | `APP_URL` | `https://ekpothe.onrender.com` — Render shows the real name; it must match exactly |
    | `ADMIN_EMAIL` | your own personal address |
-   | `BREVO_API_KEY` | the API key from step 2 |
-   | `SMTP_FROM` | `Ekpothe <your-verified-sender>` — must be the address you verified in Brevo |
+   | `ADMIN_BOOTSTRAP_CODE` | any secret string, **seven characters or more** — see below |
    | `VAPID_*` | run `npm run setup` locally once, or reuse the keys you already have |
+   | `BREVO_API_KEY`, `SMTP_*` | leave blank. Delete them if present — see step 2 |
+
+   `ADMIN_BOOTSTRAP_CODE` is your own first way in, and it exists because every
+   other door needs somebody to open it for you: colleagues get a code from the
+   administrator, and the administrator has nobody to get one from.
+
+   Make it **seven characters or longer**. A six-character code is treated as a
+   colleague's invite code and folded to upper case on its way to the server, so
+   a six-character code with a lower-case letter in it can never match. The boot
+   log warns if you pick one; it is easier not to.
+
+   Use it once, then delete it from the environment. While it is set it is a
+   standing password to the administrator account.
 
    `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are generated **once**. Every
    phone that subscribes is tied to them, so regenerating later makes every
@@ -84,30 +107,41 @@ In Render's **Logs** tab you want:
 
 ```
 push:       on
-email:      relay reachable and accepted the login
 database:   ep-something.../neondb
+email:      OFF — set SMTP_* or nobody is told they were approved
 ```
 
-If it says `email: BROKEN`, stop and fix that. Everything downstream of a broken
-mailer is invisible failure: the sign-in form says "a link is on its way"
-whether or not it arrived, deliberately, so that it cannot be used to find out
-who has registered — which means you cannot tell from the outside.
+`email: OFF` is the correct state. It means the mailer is cleanly inert rather
+than pretending to work. `email: BROKEN` means an `SMTP_*` value is still set
+and should be deleted.
 
-To re-test the mailer after correcting a value, without waiting out a redeploy:
+Then on your own phone, in this order — each step is the prerequisite for the
+next, and getting them the wrong way round is the most common way to conclude
+the app is broken when it is not:
 
-```
-https://your-app.onrender.com/api/health?recheck=1
-```
+1. Open the URL. Choose **I need an account** and register with the address you
+   set as `ADMIN_EMAIL`. Tick the confirmation box. You are approved instantly
+   and as an administrator, because the address matches.
 
-Then on your own phone:
+   You must do this *first*. `ADMIN_BOOTSTRAP_CODE` signs you in to the
+   administrator account; it does not create one. Used before you have
+   registered, it says so rather than saying the code is wrong.
 
-1. Open the URL and register with your personal address — approved instantly,
-   because it matches `ADMIN_EMAIL`.
-2. Ask for a sign-in link. Tap it. You should land signed in.
-3. Turn on notifications when asked.
-4. Post a ride. Open the URL in a private window as a second colleague, register
-   and approve yourself from the admin screen, and book the seat.
-5. You should get a notification without the app being open.
+2. Choose **I have a code** and enter `ADMIN_BOOTSTRAP_CODE` exactly as you set
+   it in Render — it is case-sensitive. You land signed in as the admin.
+
+3. Delete `ADMIN_BOOTSTRAP_CODE` from Render now, while you remember. Your
+   session lasts ninety days and is not affected.
+
+4. Turn on notifications when asked.
+
+5. Open the URL in a private window as a second colleague and register. Approve
+   them from the **Admin** screen — it shows a six-character code and a **Copy
+   message** button with WhatsApp-ready text in English and Bangla. Enter that
+   code in the private window under **I have a code**.
+
+6. Post a ride as one and book it as the other. You should get a notification
+   without the app being open.
 
 ## 5. Keep it awake while people are using it
 

@@ -247,3 +247,33 @@ test("the page never scrolls horizontally at 360px", async ({ page }) => {
     expect(overflow, `${tab} overflows by ${overflow}px`).toBeLessThanOrEqual(0);
   }
 });
+
+test("the “not an official system” notice is a notice, not a footnote", async ({ page }) => {
+  /*
+    It used to be one quiet sentence in a dashed hairline box at 13px, under the
+    reasoning that two loud things compete for attention. That was wrong about
+    which two things these are: the red panel above is the organisation's own
+    wording about entering your own details, and this says the entire app is
+    nobody's employer's. The larger claim was the smaller notice.
+
+    These assertions pin the three things that made it readable, because each of
+    them is a one-line change away from being undone.
+  */
+  await gotoOffer(page);
+  const notice = page.locator(".unofficial");
+  await expect(notice).toBeVisible();
+  await expect(notice.locator(".head")).toHaveText(/NOT AN OFFICIAL SYSTEM/i);
+
+  // The sentence that makes this a disclaimer rather than a label. Without it
+  // the notice says only the comfortable half.
+  await expect(
+    notice.getByText(/Nobody checks drivers, vehicles, driving licences or insurance/),
+  ).toBeVisible();
+  await expect(notice.getByText(/not a fare, and not a paid service/)).toBeVisible();
+
+  // At body size. 13px grey was the whole reason it read as small print.
+  const size = await notice.locator("p.sharp").evaluate(
+    (el) => Number.parseFloat(getComputedStyle(el).fontSize),
+  );
+  expect(size).toBeGreaterThanOrEqual(14);
+});

@@ -136,14 +136,47 @@ export const STRINGS = {
    * be speaking for the organisation.
    */
   unofficialTitle: { en: "Not an official system", bn: "এটি প্রাতিষ্ঠানিক ব্যবস্থা নয়" },
-  unofficial: {
-    en: "Ekpothe is a voluntary tool built by a colleague. It is not run by, endorsed by, or connected to your employer, and taking part is entirely your choice.",
-    bn: "একপথে একজন সহকর্মীর তৈরি একটি স্বেচ্ছামূলক টুল। এটি আপনার প্রতিষ্ঠান পরিচালিত বা অনুমোদিত নয়, এবং অংশ নেওয়া সম্পূর্ণ আপনার ইচ্ছা।",
+  /*
+    Three sentences that each say a different thing, because the single sentence
+    this replaced said only the easy one.
+
+    1. Whose it is. 2. What is therefore *not* being done for you — nobody
+       vetting drivers, no insurance behind it, cost-sharing that is not a fare.
+       3. That you may walk away.
+
+    The second paragraph is the one that makes this a disclaimer rather than a
+    label, and it is the reason the whole thing is worth reading.
+  */
+  unofficialLead: {
+    en: "Ekpothe is a tool a colleague built in their own time, for colleagues. It is not run by, approved by, supervised by, or connected to your employer, and nothing in it is a workplace requirement.",
+    bn: "একপথে একজন সহকর্মী নিজের সময়ে, সহকর্মীদের জন্য তৈরি করেছেন। এটি আপনার প্রতিষ্ঠান পরিচালিত, অনুমোদিত বা তত্ত্বাবধান করা নয়, এবং এর কিছুই কর্মক্ষেত্রের বাধ্যবাধকতা নয়।",
+  },
+  unofficialRisk: {
+    en: "Nobody checks drivers, vehicles, driving licences or insurance. A journey you agree to is a private arrangement between you and the other colleague, and money shared is towards fuel — not a fare, and not a paid service. If something goes wrong, it is a matter between the two of you.",
+    bn: "চালক, গাড়ি, ড্রাইভিং লাইসেন্স বা বিমা কেউ যাচাই করে না। আপনি যে যাত্রায় রাজি হন তা আপনার ও অন্য সহকর্মীর মধ্যে ব্যক্তিগত সমঝোতা, এবং ভাগ করা টাকা তেলের খরচের জন্য — কোনো ভাড়া নয়, কোনো সেবার মূল্য নয়। কিছু গোলমাল হলে তা আপনাদের দুজনের বিষয়।",
+  },
+  unofficialChoice: {
+    en: "Taking part is entirely your choice, and you can stop at any time.",
+    bn: "অংশ নেওয়া সম্পূর্ণ আপনার ইচ্ছা, এবং যেকোনো সময় আপনি বন্ধ করতে পারেন।",
   },
   unofficialShort: {
-    en: "A colleague's voluntary tool — not an official system.",
-    bn: "সহকর্মীর স্বেচ্ছামূলক টুল — প্রাতিষ্ঠানিক ব্যবস্থা নয়।",
+    en: "A colleague's voluntary tool — not an official system. Nobody vets drivers, vehicles or insurance.",
+    bn: "সহকর্মীর স্বেচ্ছামূলক টুল — প্রাতিষ্ঠানিক ব্যবস্থা নয়। চালক, গাড়ি বা বিমা কেউ যাচাই করে না।",
   },
+  /*
+    The tick box on the registration form. Deliberately first person and
+    deliberately specific: "I agree to the terms" is a reflex, and a reflex is
+    not what this needs to produce.
+  */
+  unofficialAgree: {
+    en: "I have read the above. I understand Ekpothe is not my employer\u2019s system, that nobody vets drivers or vehicles, and that I am taking part by my own choice.",
+    bn: "আমি উপরের কথাগুলো পড়েছি। আমি বুঝেছি একপথে আমার প্রতিষ্ঠানের ব্যবস্থা নয়, চালক বা গাড়ি কেউ যাচাই করে না, এবং আমি নিজের ইচ্ছায় অংশ নিচ্ছি।",
+  },
+  unofficialMustAgree: {
+    en: "Please tick the box above to confirm you have read it.",
+    bn: "পড়েছেন তা নিশ্চিত করতে উপরের ঘরে টিক দিন।",
+  },
+  readThisFirst: { en: "Read this first", bn: "আগে এটি পড়ুন" },
 
   // Registration
   register: { en: "Create an account", bn: "অ্যাকাউন্ট খুলুন" },
@@ -171,14 +204,30 @@ export const STRINGS = {
   haveCode: { en: "I have a code", bn: "আমার কাছে কোড আছে" },
   useEmailInstead: { en: "Use my email instead", bn: "বরং ইমেইল ব্যবহার করুন" },
   yourCode: { en: "Your code", bn: "আপনার কোড" },
+  /*
+    No longer promises "six characters, not case-sensitive". That is true of a
+    colleague's invite code and false of the administrator's own bootstrap code,
+    which is as long as they made it and is compared exactly — and the promise
+    was itself part of why the bootstrap code appeared not to work.
+  */
   codeHint: {
-    en: "The six characters the administrator sent you. Not case-sensitive.",
-    bn: "অ্যাডমিন আপনাকে যে ছয়টি অক্ষর পাঠিয়েছেন। বড়-ছোট হাতের অক্ষরে সমস্যা নেই।",
+    en: "The code the administrator sent you. A six-character code can be typed in any case; a longer one must be exact.",
+    bn: "অ্যাডমিন আপনাকে যে কোড পাঠিয়েছেন। ছয় অক্ষরের কোড বড়-ছোট হাতের যেকোনোভাবে লেখা যায়; এর চেয়ে বড় কোড হুবহু লিখতে হবে।",
   },
   signInWithCode: { en: "Sign in", bn: "সাইন ইন" },
   codeRejected: {
     en: "That code is not valid. Ask the administrator for a new one.",
     bn: "কোডটি সঠিক নয়। অ্যাডমিনের কাছে নতুন কোড চান।",
+  },
+  /*
+    Only ever shown to the administrator, and only when their bootstrap code was
+    correct. The code is a way of signing in to an account, not a way of making
+    one, and saying so is the difference between a five-minute fix and an
+    afternoon of guessing.
+  */
+  bootstrapNeedsAccount: {
+    en: "That code is right, but there is no administrator account yet. Go back, choose \u201cI need an account\u201d, register with the ADMIN_EMAIL address, then come back here.",
+    bn: "কোডটি ঠিক আছে, কিন্তু এখনো কোনো অ্যাডমিন অ্যাকাউন্ট নেই। ফিরে গিয়ে \u201cআমার অ্যাকাউন্ট দরকার\u201d বেছে নিন, ADMIN_EMAIL ঠিকানা দিয়ে নিবন্ধন করুন, তারপর এখানে ফিরে আসুন।",
   },
   sendThemThis: { en: "Send them this code", bn: "তাঁকে এই কোডটি পাঠান" },
   copyMessage: { en: "Copy message", bn: "বার্তা কপি করুন" },

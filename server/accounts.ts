@@ -27,6 +27,17 @@ export interface RegistrationInput {
   /** Optional, so the administrator can recognise who is asking. */
   readonly officialName?: string;
   readonly department?: string;
+  /**
+   * Confirmation that this colleague read that Ekpothe is not an official
+   * system, is nobody's employer's, and is joined by choice.
+   *
+   * Required, and checked here rather than only in the form. A notice the
+   * browser happens to render is not a notice anybody agreed to, and this is
+   * the single moment in a colleague's use of the app where they are choosing
+   * to join something — which is the only moment at which saying what they are
+   * joining is worth anything.
+   */
+  readonly acknowledged?: boolean;
 }
 
 export interface RegistrationResult {
@@ -34,6 +45,8 @@ export interface RegistrationResult {
   readonly message: string;
   /** True when a work address was used where a personal one was asked for. */
   readonly workAddress?: boolean;
+  /** True when the "not an official system" confirmation was not given. */
+  readonly notAcknowledged?: boolean;
 }
 
 
@@ -100,6 +113,16 @@ export class Accounts {
       return { ok: false, message: "Please tell colleagues what to call you." };
     }
 
+    if (input.acknowledged !== true) {
+      return {
+        ok: false,
+        notAcknowledged: true,
+        message:
+          "Please confirm you have read that Ekpothe is not an official system " +
+          "before creating an account.",
+      };
+    }
+
     // One reply whether the address is new or already registered. Anything
     // else turns this form into a way of discovering who has signed up.
     const same: RegistrationResult = {
@@ -117,11 +140,12 @@ export class Accounts {
       message: "You're the administrator — signed up and approved. Sign in now.",
     };
 
+    const now = new Date().toISOString();
     await this.db.run(
       `INSERT INTO users
          (id, displayName, email, status, role,
-          officialName, department, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          officialName, department, acknowledgedAt, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       randomUUID(),
       input.displayName.trim().slice(0, 80),
       email,
@@ -129,7 +153,10 @@ export class Accounts {
       isAdmin ? "admin" : "member",
       input.officialName?.trim().slice(0, 120) || null,
       input.department?.trim().slice(0, 80) || null,
-      new Date().toISOString(),
+      // Same instant as the row: they confirmed it to create the account, and
+      // the account did not exist before they confirmed it.
+      now,
+      now,
     );
     return isAdmin ? adminWelcome : same;
   }

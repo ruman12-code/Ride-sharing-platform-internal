@@ -358,6 +358,7 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             displayName: String(b["displayName"] ?? ""),
             ...(b["officialName"] ? { officialName: String(b["officialName"]) } : {}),
             ...(b["department"] ? { department: String(b["department"]) } : {}),
+            acknowledged: b["acknowledged"] === true,
           });
 
           // Tell the administrator somebody is waiting. Deliberately after the
@@ -501,20 +502,39 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
 
         if (url.pathname === "/api/sign-in" && req.method === "POST") {
           const b = await body(req);
-          const code = String(b["code"] ?? "");
+          /*
+            Trimmed. A phone keyboard that appends a space after a long code
+            changes its length, and length is what decides whether the
+            administrator's code is even compared — so an invisible character
+            was enough to make the one guaranteed door report "not valid".
+          */
+          const code = String(b["code"] ?? "").trim();
 
           // The administrator's own first way in. Checked before the invite
           // codes so that it works even when none has ever been minted.
-          if (ADMIN_BOOTSTRAP_CODE && code.length === ADMIN_BOOTSTRAP_CODE.length) {
+          if (ADMIN_BOOTSTRAP_CODE) {
             const given = Buffer.from(code);
             const want = Buffer.from(ADMIN_BOOTSTRAP_CODE);
-            if (timingSafeEqual(given, want)) {
+            /*
+              Byte lengths, not string lengths. timingSafeEqual throws on a
+              length mismatch, and one non-ASCII character makes a string of the
+              right length into a buffer of the wrong one — turning a wrong code
+              into a 500 rather than a refusal.
+            */
+            if (given.length === want.length && timingSafeEqual(given, want)) {
               const admin = await db.get<{ id: string }>(
                 "SELECT id FROM users WHERE email = ? AND role = 'admin'",
                 ADMIN_EMAIL,
               );
               if (!admin) {
+                /*
+                  Machine-readable, because the app is bilingual and this is the
+                  one refusal that carries an instruction rather than a refusal.
+                  It leaks nothing: it is only ever reached by somebody who
+                  already holds the bootstrap code.
+                */
                 return send(401, {
+                  reason: "no-admin-account",
                   error:
                     "Register with ADMIN_EMAIL first, then use this code to sign in.",
                 });
@@ -955,6 +975,23 @@ server.listen(PORT, HOST, () => {
   if (ADMIN_BOOTSTRAP_CODE) {
     console.log("");
     console.log("  ADMIN_BOOTSTRAP_CODE is set. It signs you in as the administrator.");
+    /*
+      Six characters is the one length that cannot work reliably.
+
+      The code box folds a six-character entry to upper case, because that is
+      the shape of a colleague's invite code and folding lets them type theirs
+      however they like. A six-character bootstrap code containing a lower-case
+      letter is therefore transformed on its way here and refused — which is
+      precisely the silent lockout this code exists to prevent, and it is not
+      the kind of thing anybody guesses from "that code is not valid".
+    */
+    if (ADMIN_BOOTSTRAP_CODE.length === 6 && /[a-z]/.test(ADMIN_BOOTSTRAP_CODE)) {
+      console.log(
+        "  WARNING: it is six characters and contains a lower-case letter, which\n" +
+          "           the code box will fold to upper case. Use a longer code, or an\n" +
+          "           upper-case one, or you will not be able to sign in with it.",
+      );
+    }
     console.log("  Use it once, then delete it from the environment.");
   }
   if (OWN_TLS) {

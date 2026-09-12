@@ -20,6 +20,30 @@ import { Wordmark } from "../components/Wordmark.jsx";
  * same reply whether or not the address has an account — anything sharper turns
  * this box into a way of finding out who works here.
  */
+/**
+ * What to send when somebody types a code.
+ *
+ * Normalised once, here, rather than on every keystroke — which is what went
+ * wrong. The field used to upper-case whatever it held while it was six
+ * characters or shorter, so the first six characters of *any* code were folded:
+ * an administrator whose bootstrap code contained a lower-case letter sent a
+ * code of exactly the right length and entirely the wrong bytes, and was told
+ * only that it was not valid. That is the same silent lockout this door exists
+ * to prevent, arriving by a new route.
+ *
+ * Six characters is a colleague's invite code. Those are minted from an
+ * upper-case alphabet, so folding is safe and lets somebody type theirs in
+ * lower case. Anything longer is the administrator's own bootstrap code, which
+ * the server compares byte for byte, so it is passed through untouched.
+ *
+ * Exported because it was a conditional expression inside a JSX attribute,
+ * where nothing could test it and the bug lived for two deployments.
+ */
+export const normaliseCode = (raw: string): string => {
+  const entered = raw.trim();
+  return entered.length === 6 ? entered.toUpperCase() : entered;
+};
+
 export const AccessGate = ({
   lang, onSignedIn,
 }: {
@@ -42,6 +66,11 @@ export const AccessGate = ({
   const [officialName, setOfficialName] = useState("");
   const [department, setDepartment] = useState("");
   const [showOptional, setShowOptional] = useState(false);
+  /*
+    Never pre-ticked, and never remembered between visits. A box that arrives
+    already ticked records nothing about what anybody read.
+  */
+  const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | undefined>();
   const [blocked, setBlocked] = useState<readonly string[]>([]);
@@ -110,17 +139,27 @@ export const AccessGate = ({
           displayName: name,
           officialName,
           department,
+          acknowledged: agreed,
         });
         const b = (await res.json()) as { ok: boolean; message: string };
         setMessage({ ok: b.ok, text: b.message });
         if (b.ok) setMode("sign-in");
       } else if (mode === "code") {
-        const res = await post("/api/sign-in", { code });
+        const res = await post("/api/sign-in", { code: normaliseCode(code) });
         if (res.ok) {
           onSignedIn();
           return;
         }
-        setMessage({ ok: false, text: t("codeRejected", lang) });
+        /*
+          The server can distinguish "your code is right but you have no account
+          yet" from "that code is nothing". Showing one message for both hid the
+          only instruction that would have helped.
+        */
+        const b = (await res.json().catch(() => ({}))) as { reason?: string };
+        setMessage({
+          ok: false,
+          text: t(b.reason === "no-admin-account" ? "bootstrapNeedsAccount" : "codeRejected", lang),
+        });
       } else {
         const res = await post("/api/sign-in-link", { email });
         const b = (await res.json()) as { ok: boolean; message: string };
@@ -140,7 +179,12 @@ export const AccessGate = ({
   const canSubmit =
     mode === "code"
       ? code.trim().length >= 6
-      : email.trim().length > 3 && (mode === "sign-in" || name.trim().length > 0);
+      : mode === "sign-in"
+        ? email.trim().length > 3
+        // Registering needs the confirmation as well as the details. The server
+        // refuses without it either way; disabling the button is so that a
+        // colleague finds out before filling the form in, not after.
+        : email.trim().length > 3 && name.trim().length > 0 && agreed;
 
   if (arriving) {
     return (
@@ -171,7 +215,14 @@ export const AccessGate = ({
               id="code"
               className="input code-input"
               autoComplete="one-time-code"
-              autoCapitalize="characters"
+              /*
+                Off, not "characters". A phone keyboard capitalising for you is
+                help when the code is six letters and sabotage when it is a
+                passphrase the administrator chose. Invite codes are folded to
+                upper case when the form is submitted instead.
+              */
+              autoCapitalize="off"
+              autoCorrect="off"
               spellCheck={false}
               /*
                 Not capped at six. Colleagues' codes are six characters, but
@@ -183,14 +234,11 @@ export const AccessGate = ({
               maxLength={64}
               value={code}
               /*
-                Upper-cased for display only when it looks like an invite code.
-                The bootstrap code is compared byte for byte, so folding its
-                case would stop it matching.
+                Kept exactly as typed. Every transformation that used to happen
+                here happens once, at submission, where the whole code is
+                visible and its length actually means something.
               */
-              onChange={(e) => {
-                const v = e.target.value;
-                setCode(v.length <= 6 ? v.toUpperCase() : v);
-              }}
+              onChange={(e) => setCode(e.target.value)}
             />
             <p className="hint">{t("codeHint", lang)}</p>
           </>
@@ -283,6 +331,24 @@ export const AccessGate = ({
         </>
         )}
 
+        {/*
+          Last thing before the button, so it is read against a form that is
+          already filled in and the decision it asks for is the live one.
+        */}
+        {mode === "register" && (
+          <label className="agree" style={{ marginTop: 16 }}>
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(e) => {
+                setAgreed(e.target.checked);
+                setMessage(undefined);
+              }}
+            />
+            <span>{t("unofficialAgree", lang)}</span>
+          </label>
+        )}
+
         {message && (
           <div className={`notice ${message.ok ? "good" : "error"}`} style={{ marginTop: 16 }}>
             {message.text}
@@ -308,6 +374,7 @@ export const AccessGate = ({
           onClick={() => {
             setMode(mode === "register" ? "sign-in" : "register");
             setMessage(undefined);
+            setAgreed(false);
           }}
         >
           {t(mode === "register" ? "alreadyHave" : "needAccount", lang)}

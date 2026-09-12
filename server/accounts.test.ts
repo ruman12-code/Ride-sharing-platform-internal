@@ -21,6 +21,10 @@ afterEach(async () => {
 const good = {
   email: "nusrat.personal@gmail.com",
   displayName: "Nusrat",
+  // Registration requires confirming that Ekpothe is not an official system.
+  // Carried in the shared fixture so that every other test here is about the
+  // thing it is named after; the requirement itself is tested on its own below.
+  acknowledged: true,
 };
 
 describe.skipIf(!hasPostgres)("work addresses are refused on purpose", () => {
@@ -44,6 +48,45 @@ describe.skipIf(!hasPostgres)("work addresses are refused on purpose", () => {
   it("reads the blocked list with or without the @", async () => {
     expect(parseBlockedDomains("@giz.de, Example.Org")).toEqual(["giz.de", "example.org"]);
     expect(parseBlockedDomains(undefined)).toEqual([]);
+  });
+});
+
+describe.skipIf(!hasPostgres)("the \u201cnot an official system\u201d confirmation", () => {
+  it("refuses to create an account without it", async () => {
+    // Enforced on the server, not only by the form. A notice the browser
+    // happened to render is not a notice anybody agreed to, and this is the
+    // one moment a colleague is choosing to join the thing.
+    const r = await accounts.register({ ...good, acknowledged: false });
+    expect(r.ok).toBe(false);
+    expect(r.notAcknowledged).toBe(true);
+    expect(await accounts.pending()).toHaveLength(0);
+  });
+
+  it("refuses when the field is simply absent, rather than defaulting to yes", async () => {
+    const { acknowledged: _drop, ...withoutIt } = good;
+    expect((await accounts.register(withoutIt)).ok).toBe(false);
+    expect(await accounts.pending()).toHaveLength(0);
+  });
+
+  it("records when it was given, so it is a fact rather than a rendered notice", async () => {
+    await accounts.register(good);
+    const row = await db.get<{ acknowledgedAt: string | null }>(
+      "SELECT acknowledgedAt FROM users WHERE email = ?",
+      good.email,
+    );
+    expect(row?.acknowledgedAt).toBeTruthy();
+    expect(Number.isNaN(Date.parse(row!.acknowledgedAt!))).toBe(false);
+  });
+
+  it("holds the administrator to it as well", async () => {
+    // The person it protects most is the one who built this. Exempting them
+    // would leave the only account with no record of having read it.
+    const r = await accounts.register({
+      ...good,
+      email: "ruman@personal.com",
+      acknowledged: false,
+    });
+    expect(r.ok).toBe(false);
   });
 });
 

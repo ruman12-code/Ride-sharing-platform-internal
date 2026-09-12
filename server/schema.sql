@@ -40,6 +40,12 @@ CREATE TABLE IF NOT EXISTS users (
   role             TEXT NOT NULL DEFAULT 'member',
   reliabilityScore INTEGER NOT NULL DEFAULT 100,
   isSuspended      INTEGER NOT NULL DEFAULT 0,
+  -- When this colleague confirmed they had read that Ekpothe is not an official
+  -- system. Nobody gets an account without it. It is stored rather than merely
+  -- displayed because "the app showed a notice" and "this person confirmed, on
+  -- this date, that they read it" are not the same claim, and the second is the
+  -- one that protects both them and whoever built this.
+  acknowledgedAt   TEXT,
   createdAt        TEXT NOT NULL
 );
 
@@ -292,3 +298,17 @@ CREATE TABLE IF NOT EXISTS login_links (
   usedAt    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_login_links_user ON login_links(userId, createdAt);
+
+
+-- ---------------------------------------------------------------------------
+-- Changes to tables that already exist.
+--
+-- Everything above is CREATE TABLE IF NOT EXISTS, which is silently a no-op
+-- once a table is there — so a column added to a definition above reaches a
+-- fresh database and never reaches the one already running. That is a schema
+-- change that passes every test and does nothing in production.
+--
+-- Anything added to an existing table goes here instead, as an idempotent
+-- ALTER. These run on every boot and must stay safe to run repeatedly.
+-- ---------------------------------------------------------------------------
+ALTER TABLE users ADD COLUMN IF NOT EXISTS acknowledgedAt TEXT;
