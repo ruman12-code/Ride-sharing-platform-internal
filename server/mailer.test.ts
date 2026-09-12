@@ -99,6 +99,28 @@ describe("sending over HTTPS", () => {
     // False, not a throw, and nothing about the recipient reaches the caller.
     expect(await createMailer().send("nusrat@personal.com", "s", "t")).toBe(false);
   });
+
+  it("remembers why a send failed, since verify() cannot see it", async () => {
+    // An unverified sender is the failure that passes every check and still
+    // delivers nothing. Without this the administrator has no thread to pull.
+    reply = { status: 400, body: '{"code":"invalid_parameter","message":"Sender not valid"}' };
+    const mailer = createMailer();
+    await mailer.send("nusrat@personal.com", "s", "t");
+    expect(mailer.lastSendError()).toContain("Sender not valid");
+    expect(mailer.lastSendError()).toContain("400");
+  });
+
+  it("forgets the failure once a send succeeds", async () => {
+    reply = { status: 400, body: '{"message":"Sender not valid"}' };
+    const mailer = createMailer();
+    await mailer.send("a@b.c", "s", "t");
+    expect(mailer.lastSendError()).toBeDefined();
+
+    reply = { status: 201, body: '{"messageId":"<ok>"}' };
+    await mailer.send("a@b.c", "s", "t");
+    // Otherwise a fixed configuration still reads as broken for ever.
+    expect(mailer.lastSendError()).toBeUndefined();
+  });
 });
 
 describe("choosing a transport", () => {

@@ -31,10 +31,12 @@ Free, no card, and it allows a single verified sender address — which is what
 makes it usable when you own no domain.
 
 1. Sign up at **brevo.com**.
-2. **Senders, Domains & Dedicated IPs → Senders → Add a sender.** Use an address
-   you can read; Brevo emails it a confirmation link you must click. A dedicated
-   Gmail account (`ekpothe.dhaka@gmail.com`) is tidier than your personal one:
-   colleagues see mail from Ekpothe, and replies do not land in your inbox.
+2. **Settings (the gear, top right) → Senders & IPs → Senders → Add a sender.**
+   Use an address you can read. Brevo emails it a six-digit **code**, which you
+   paste back and click *Verify sender* — it is not a link you click in the
+   message. A dedicated Gmail account (`ekpothe.dhaka@gmail.com`) is tidier than
+   your personal one: colleagues see mail from Ekpothe, and replies do not land
+   in your inbox.
 3. **SMTP & API → API Keys → Generate a new API key.** Name it `Ekpothe`. Copy
    it — it is shown once.
 
@@ -54,8 +56,13 @@ in step 2. An unverified sender is rejected and the reason appears in the logs.
 https://your-app.onrender.com/api/health?recheck=1
 ```
 
-`"email":"ok"` means the key works and the account answered. Anything else
-carries the reason with it.
+`"email":"ok"` means the key works and the account answered.
+
+**It does not mean mail can be sent.** The check only proves the credential; an
+unverified sender address passes it and then refuses every send. So look for
+`lastEmailFailure` too — it appears once something has actually been attempted,
+and carries Brevo's own words, usually *"Sender not valid: ... is not a
+validated sender"*. Ask for a sign-in link, then reload the health page.
 
 Then send yourself a real one: register, ask for a sign-in link, and **see which
 folder it lands in.**

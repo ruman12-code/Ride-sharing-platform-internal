@@ -40,6 +40,16 @@ export interface Mailer {
    */
   verify(): Promise<{ ok: boolean; error?: string }>;
   send(to: string, subject: string, text: string, html?: string): Promise<boolean>;
+  /**
+   * Why the last send failed, if one did.
+   *
+   * `verify()` only proves the credential is good. The failure that gets past
+   * it is an unverified sender address: the key is accepted, every check
+   * passes, and each send is refused. Without this, the administrator sees a
+   * healthy app, colleagues see nothing arrive, and there is no thread to pull
+   * — which is precisely the hole this pilot fell into twice.
+   */
+  lastSendError(): string | undefined;
 }
 
 /** A mailer that is configured but has nothing behind it. */
@@ -50,6 +60,9 @@ const inert = (reason: string): Mailer => ({
   },
   async send() {
     return false;
+  },
+  lastSendError() {
+    return reason;
   },
 });
 
@@ -76,9 +89,11 @@ const parseFrom = (from: string): { name: string; email: string } => {
 const createHttpMailer = (apiKey: string, from: string): Mailer => {
   const base = (process.env["BREVO_API_URL"] ?? "https://api.brevo.com").replace(/\/$/, "");
   const sender = parseFrom(from);
+  let lastError: string | undefined;
 
   return {
     enabled: true,
+    lastSendError: () => lastError,
 
     async verify() {
       try {
@@ -114,14 +129,20 @@ const createHttpMailer = (apiKey: string, from: string): Mailer => {
           }),
           signal: AbortSignal.timeout(20_000),
         });
-        if (res.ok) return true;
-        // The body carries Brevo's reason — an unverified sender, most often.
-        // Logged, never surfaced: a failure here must not tell the person at
-        // the form whether that address exists.
-        console.error("mail send failed:", res.status, await res.text().catch(() => ""));
+        if (res.ok) {
+          lastError = undefined;
+          return true;
+        }
+        // Brevo's body carries the reason — an unverified sender, most often.
+        // Recorded for the health endpoint and logged; never returned to the
+        // person at the form, who must not learn whether an address exists.
+        const body = await res.text().catch(() => "");
+        lastError = `HTTP ${res.status} from Brevo${body ? `: ${body.slice(0, 300)}` : ""}`;
+        console.error("mail send failed:", lastError);
         return false;
       } catch (e) {
-        console.error("mail send failed:", e);
+        lastError = e instanceof Error ? e.message : String(e);
+        console.error("mail send failed:", lastError);
         return false;
       }
     },
@@ -171,8 +192,11 @@ const createSmtpMailer = (host: string, from: string): Mailer => {
       ...(user ? { auth: { user, pass: process.env["SMTP_PASS"] ?? "" } } : {}),
     });
 
+  let lastError: string | undefined;
+
   return {
     enabled: true,
+    lastSendError: () => lastError,
     async verify() {
       const transport = await open();
       try {
@@ -193,11 +217,13 @@ const createSmtpMailer = (host: string, from: string): Mailer => {
       const transport = await open();
       try {
         await transport.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
+        lastError = undefined;
         return true;
       } catch (e) {
-        // Logged, never surfaced. A failure here must not tell the person at
-        // the form whether that address exists or was deliverable.
-        console.error("mail send failed:", e);
+        // Recorded and logged, never surfaced. A failure here must not tell the
+        // person at the form whether that address exists or was deliverable.
+        lastError = e instanceof Error ? e.message : String(e);
+        console.error("mail send failed:", lastError);
         return false;
       } finally {
         transport.close();

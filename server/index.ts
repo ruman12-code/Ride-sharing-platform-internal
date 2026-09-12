@@ -453,12 +453,24 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             // endpoint and must stay fast.
             void checkMailer();
           }
+          /*
+            The last send failure is reported separately from the relay check.
+
+            They fail for different reasons and only one of them is visible to
+            `verify()`. A key can be perfectly valid while every send is refused
+            because the sender address was never verified — the check passes,
+            the app looks healthy, and nothing arrives. Saying both means the
+            administrator sees the actual obstacle rather than a clean bill of
+            health and an empty inbox.
+          */
+          const lastSend = mailer.lastSendError();
           return send(200, {
             ok: true,
             database: "ok",
             // The reason is included because "broken" on its own sends the
             // operator back to the logs this endpoint exists to replace.
             email: describeMail(mailStatus),
+            ...(lastSend ? { lastEmailFailure: lastSend } : {}),
             push: notifier.canPush ? "on" : "off",
           });
         }
