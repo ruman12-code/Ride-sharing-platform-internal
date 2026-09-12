@@ -2,188 +2,86 @@
 
 **Nobody can sign in until this works.** Signing in means tapping a link sent to
 your address — there is no password and no second door — so email is not a nice
-extra here, it is the entrance.
+extra here, it is the entrance. It also carries the notifications push cannot: a
+colleague who never granted notification permission still learns that somebody
+wants a seat.
 
-It also carries the notifications that push cannot: a colleague who never
-granted notification permission still learns that somebody wants a seat.
-
-**Push is already set up** — `npm run setup` generated those keys, because they
-are self-signed and need no account. Email needs credentials only you can
+Push is already set up; `npm run setup` generates those keys locally because
+they are self-signed and need no account. Email needs credentials only you can
 obtain, which is why this page exists.
 
 ---
 
-## Which provider
+## Send over HTTPS, not SMTP
 
-| | Free? | Setup | Good for |
-|---|---|---|---|
-| **Gmail, from a dedicated account** | ~500/day | ~5 min | **Recommended.** See below |
-| **Brevo** | 300 emails/day | ~10 min | Better at scale; worse deliverability without a domain |
-| **Resend** | 100/day, 3k/month | ~5 min | Simplest. Needs a domain for anything beyond testing |
-| Your own domain via the host | varies | varies | Later, once you buy a domain |
+This is the part that is not obvious and cost this pilot a launch.
 
-At twenty colleagues, a busy day is perhaps fifty emails. Any of these is ample;
-the difference between them is deliverability, not volume.
+**Most free hosting tiers block outbound SMTP.** Render blocks ports 25, 465 and
+587 on free web services — deliberately, as anti-spam policy, since September
+2025. On a host like that, no SMTP settings can work. The connection does not
+get refused, it simply hangs, and the resulting timeout reads exactly like a
+wrong password. We spent an afternoon on a correct Gmail App Password that never
+had a chance.
 
----
+Sending over an HTTP API uses port 443, which nothing blocks.
 
-## Why a dedicated Gmail account, and not Brevo
+## Brevo, in about ten minutes
 
-This reverses an earlier recommendation in this file, for a reason that only
-became decisive once the sign-in link became the **only** way in.
+Free, no card, and it allows a single verified sender address — which is what
+makes it usable when you own no domain.
 
-You have no domain, so `SMTP_FROM` is a `gmail.com` address. Sending mail *from*
-gmail.com through Brevo's servers means SPF names Brevo's IP rather than
-Google's, and DKIM is signed by Brevo's domain rather than gmail.com — so
-neither aligns with the From address. Consumer gmail.com publishes `p=none`, so
-nothing bounces. It is simply weighted toward spam.
+1. Sign up at **brevo.com**.
+2. **Senders, Domains & Dedicated IPs → Senders → Add a sender.** Use an address
+   you can read; Brevo emails it a confirmation link you must click. A dedicated
+   Gmail account (`ekpothe.dhaka@gmail.com`) is tidier than your personal one:
+   colleagues see mail from Ekpothe, and replies do not land in your inbox.
+3. **SMTP & API → API Keys → Generate a new API key.** Name it `Ekpothe`. Copy
+   it — it is shown once.
 
-For a newsletter that is a nuisance. Here, the message being filtered is the one
-that lets a colleague into the app, and the form deliberately says "a link is on
-its way" whether or not it arrived, so nobody can tell you it did not. That is
-the failure that ends a pilot quietly.
-
-Sending through Google's own servers with a gmail.com From aligns perfectly, and
-your colleagues are on exactly the personal inboxes that trust it most.
-
-**A separate account, not your personal one.** A Gmail App Password grants broad
-access to that mailbox, so if the server is ever compromised the blast radius
-should be an account that holds nothing. It is better for the app too:
-colleagues see mail from Ekpothe, and their replies do not land in your inbox.
-
-Revisit Brevo if you ever put a real domain in front of this — with a domain you
-control, its alignment is fine and its sending reputation is better than any
-individual account's.
-
-## Option A — a dedicated Gmail account *(recommended)*
-
-1. Create a new Google account, e.g. `ekpothe.dhaka@gmail.com`. Free, no card.
-2. Turn on 2-Step Verification on it — App Passwords do not exist without it.
-3. Google Account → Security → App passwords → create one named "Ekpothe".
-4. Use the 16-character password Google shows. **Not** the account password.
+Two values go into your host's dashboard:
 
 ```
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=ekpothe.dhaka@gmail.com
-SMTP_PASS=<the 16-character app password, no spaces>
+BREVO_API_KEY=xkeysib-...
 SMTP_FROM=Ekpothe <ekpothe.dhaka@gmail.com>
 ```
 
-Then prove it, before anything else:
+`SMTP_FROM` keeps its name for continuity, and must be the address you verified
+in step 2. An unverified sender is rejected and the reason appears in the logs.
 
-```sh
-npm run preflight -- your.own@email.com
-```
-
-That opens a real connection, authenticates, and sends a real message. Check
-**which folder it lands in**. If it is spam, mark it "not spam" and say so in
-your invitation message — a link nobody can find is a link nobody can use.
-
-## Option B — Brevo
-
-1. Sign up at **brevo.com** with your personal email. Free, no card.
-2. **SMTP & API** → **SMTP** tab.
-3. Copy the login and the SMTP key it shows.
-
-```bash
-SMTP_HOST=smtp-relay.brevo.com
-SMTP_PORT=587
-SMTP_USER=<the login Brevo shows>
-SMTP_PASS=<the SMTP key>
-SMTP_FROM=Ekpothe <your.personal@gmail.com>
-```
-
-Brevo lets you send from an address you have verified, so verify the personal
-address you intend to use under **Senders**.
-
-## Option B — Gmail app password *(quickest)*
-
-Works, with two caveats worth knowing before you choose it.
-
-1. Your Google account needs **2-Step Verification** on.
-2. Go to **myaccount.google.com/apppasswords**, create one named "Ekpothe".
-3. Use the 16-character password Google gives you — **not** your Gmail password.
-
-```bash
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your.personal@gmail.com
-SMTP_PASS=<the 16-character app password>
-SMTP_FROM=Ekpothe <your.personal@gmail.com>
-```
-
-**Caveat 1 — everything comes from your personal address.** Colleagues will see
-your Gmail. For a pilot run by a named colleague that is arguably honest, but
-decide deliberately rather than discover it.
-
-**Caveat 2 — an app password is full access to that mailbox.** If the server is
-compromised, so is your Gmail. Brevo's key can only send, which is why it is the
-recommendation.
-
-## Option C — Resend
-
-1. Sign up at **resend.com**, create an API key.
-
-```bash
-SMTP_HOST=smtp.resend.com
-SMTP_PORT=587
-SMTP_USER=resend
-SMTP_PASS=<your API key>
-SMTP_FROM=Ekpothe <onboarding@resend.dev>
-```
-
-`onboarding@resend.dev` works without a domain but **only sends to your own
-verified address** — fine for testing the wiring, not for colleagues. For real
-use you need a domain, which is why this sits below Brevo for now.
-
----
-
-## Where the values go
-
-**Locally:** in `.env.local`, which `npm run setup` created and which is
-git-ignored. The server reads it automatically.
-
-**Deployed:** in your host's environment variables (Fly secrets, Render's
-Environment tab). **Never commit them.**
-
-```bash
-# Fly
-fly secrets set SMTP_HOST=... SMTP_USER=... SMTP_PASS=... SMTP_FROM=...
-```
-
----
-
-## Checking it works
-
-Start the server and read the first lines:
+## Check it, before anything else
 
 ```
-notify:     push + email          ← both live
-notify:     email only            ← VAPID keys missing
-notify:     NONE                  ← neither; colleagues must open the app
+https://your-app.onrender.com/api/health?recheck=1
 ```
 
-Then test the loop for real, which is the only test that means anything:
+`"email":"ok"` means the key works and the account answered. Anything else
+carries the reason with it.
 
-1. Publish a ride from one browser.
-2. Request a seat from another, signed in as somebody else.
-3. **The driver's inbox should have "… wants a seat".**
+Then send yourself a real one: register, ask for a sign-in link, and **see which
+folder it lands in.**
 
-If it does not arrive, the server logs the reason — look for `mail send failed`.
-The most common causes are a wrong port (587, not 465, unless your provider says
-otherwise) and an unverified sender address.
+## About spam, honestly
 
----
+With no domain of your own, mail sent from a `gmail.com` address through
+Brevo's servers fails SPF and DKIM alignment — the From says Gmail, the sending
+infrastructure is Brevo's. Consumer `gmail.com` publishes `p=none`, so nothing
+bounces; it is simply weighted toward spam.
 
-## A GDPR note, since colleagues are GIZ staff
+For a pilot of twenty colleagues this is manageable, and worth saying out loud
+in your invitation: *"the first email may land in spam — mark it 'not spam' and
+it won't happen again."*
 
-A third-party mail provider that handles your colleagues' addresses is a **data
-processor**. For a small voluntary pilot using personal addresses this is
-ordinary and low-risk — it is the same shape as any mailing list — but it is one
-of the things to mention when you speak to the Data Protection Officer, rather
-than one to discover afterwards.
+It is properly fixed by owning a domain. Adding one to Brevo and letting it sign
+with your DKIM aligns everything and the problem disappears. That is a
+worthwhile afternoon once the pilot has proved it is worth keeping — not before.
 
-The pilot already keeps this small: it holds personal addresses rather than
-work ones, and the only thing ever emailed is a short notification with no
-journey details beyond a time and a pickup point.
+## If your host allows SMTP
+
+Leave `BREVO_API_KEY` unset and configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+`SMTP_PASS` and `SMTP_FROM` instead. The code still supports it, and where it
+works it is one fewer account to hold. A paid Render instance unblocks 465 and
+587; port 25 stays blocked everywhere.
+
+The SMTP path also resolves the host to IPv4 before connecting, because
+nodemailer picks at random between the IPv4 and IPv6 answers and many containers
+have no IPv6 route — a coin flip between working and `ENETUNREACH`.

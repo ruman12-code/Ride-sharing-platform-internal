@@ -47,12 +47,14 @@ Nothing to create inside it: the app builds its own tables on first boot.
 ## 2. Email
 
 Do this before deploying. **Nobody can sign in without it** — the sign-in link
-is the only door. `EMAIL_SETUP.md` has the steps; the short version is a
-dedicated Gmail account with an App Password, which delivers better than a relay
-when you have no domain of your own.
+is the only door.
 
-You need five values: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
-`SMTP_FROM`.
+It goes over HTTPS rather than SMTP, and that is not a preference: Render's free
+web services block outbound ports 25, 465 and 587 as anti-spam policy. On a free
+instance an SMTP connection simply hangs, and the timeout reads exactly like a
+wrong password. `EMAIL_SETUP.md` has the steps.
+
+You need two values: `BREVO_API_KEY` and `SMTP_FROM`.
 
 ## 3. The app
 
@@ -66,7 +68,8 @@ You need five values: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
    | `DATABASE_URL` | the Neon string from step 1 |
    | `APP_URL` | `https://ekpothe.onrender.com` — Render shows the real name; it must match exactly |
    | `ADMIN_EMAIL` | your own personal address |
-   | `SMTP_*` | the five values from step 2 |
+   | `BREVO_API_KEY` | the API key from step 2 |
+   | `SMTP_FROM` | `Ekpothe <your-verified-sender>` — must be the address you verified in Brevo |
    | `VAPID_*` | run `npm run setup` locally once, or reuse the keys you already have |
 
    `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are generated **once**. Every
@@ -90,10 +93,10 @@ mailer is invisible failure: the sign-in form says "a link is on its way"
 whether or not it arrived, deliberately, so that it cannot be used to find out
 who has registered — which means you cannot tell from the outside.
 
-To send a real test message from the real server, use Render's **Shell** tab:
+To re-test the mailer after correcting a value, without waiting out a redeploy:
 
-```sh
-node tools/preflight.mjs your.own@email.com
+```
+https://your-app.onrender.com/api/health?recheck=1
 ```
 
 Then on your own phone:

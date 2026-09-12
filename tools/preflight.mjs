@@ -85,9 +85,16 @@ if (!pub || !priv) {
 }
 
 // --- email: the one that must work ----------------------------------------
-const host = need("SMTP_HOST");
 const from = need("SMTP_FROM");
-need("SMTP_PORT");
+const brevoKey = process.env["BREVO_API_KEY"]?.trim();
+const host = brevoKey ? undefined : need("SMTP_HOST");
+if (!brevoKey) {
+  need("SMTP_PORT");
+  warnings.push(
+    "sending over SMTP. Many hosts block ports 25/465/587 — Render's free tier does. " +
+      "If mail never arrives there, set BREVO_API_KEY and send over HTTPS instead.",
+  );
+}
 
 const report = () => {
   console.log("");
@@ -107,7 +114,26 @@ const report = () => {
   process.exit(problems.length === 0 ? 0 : 1);
 };
 
-if (!host || !from) report();
+if (!from) report();
+
+if (brevoKey) {
+  // The HTTP path: check the key against the account endpoint, the same way
+  // the server does at boot.
+  const base = (process.env["BREVO_API_URL"] ?? "https://api.brevo.com").replace(/\/$/, "");
+  try {
+    const res = await fetch(`${base}/v3/account`, {
+      headers: { "api-key": brevoKey, accept: "application/json" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (res.ok) ok.push("brevo: the API key was accepted");
+    else problems.push(`brevo: key rejected (HTTP ${res.status}). Nobody can sign in until this works.`);
+  } catch (e) {
+    problems.push(`brevo: could not reach ${base} — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  report();
+}
+
+if (!host) report();
 
 const port = Number(process.env["SMTP_PORT"] ?? 587);
 const user = process.env["SMTP_USER"];

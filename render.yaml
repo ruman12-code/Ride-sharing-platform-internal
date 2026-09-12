@@ -54,14 +54,14 @@ services:
       - key: ADMIN_EMAIL
         sync: false
       # Nobody can sign in without a working mailer. See docs/EMAIL_SETUP.md.
-      - key: SMTP_HOST
+      #
+      # Mail goes over HTTPS, not SMTP. Render's free web services block
+      # outbound traffic to ports 25, 465 and 587 as policy, so no SMTP
+      # configuration can work here — the connection hangs, which reads exactly
+      # like a wrong password and is nothing of the kind.
+      - key: BREVO_API_KEY
         sync: false
-      - key: SMTP_PORT
-        sync: false
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
+      # Who the mail is from. Must be an address verified in Brevo.
       - key: SMTP_FROM
         sync: false
       # Push. Generate once with `npm run setup` and never again: every phone
