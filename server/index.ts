@@ -1,4 +1,5 @@
 import { setDefaultResultOrder } from "node:dns";
+import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { readFileSync, existsSync } from "node:fs";
@@ -137,6 +138,21 @@ if (!ADMIN_EMAIL) {
   );
   process.exit(1);
 }
+
+/**
+ * A first way in for the administrator, when mail is not available.
+ *
+ * Everybody else joins by a code the administrator mints for them. The
+ * administrator has nobody to mint one for *them*, and with no working mailer
+ * there is no link either — an approved account with no door, which is the same
+ * lockout this pilot has now shipped twice in different disguises.
+ *
+ * Set it to any secret string, sign in once, and delete it. It is compared in
+ * constant time and the boot banner says loudly that it is set, because a
+ * standing password in an environment variable is a thing to remove rather than
+ * to forget.
+ */
+const ADMIN_BOOTSTRAP_CODE = (process.env["ADMIN_BOOTSTRAP_CODE"] ?? "").trim();
 
 const db = new Db(DATABASE_URL);
 const api = new Api(db);
@@ -486,6 +502,29 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         if (url.pathname === "/api/sign-in" && req.method === "POST") {
           const b = await body(req);
           const code = String(b["code"] ?? "");
+
+          // The administrator's own first way in. Checked before the invite
+          // codes so that it works even when none has ever been minted.
+          if (ADMIN_BOOTSTRAP_CODE && code.length === ADMIN_BOOTSTRAP_CODE.length) {
+            const given = Buffer.from(code);
+            const want = Buffer.from(ADMIN_BOOTSTRAP_CODE);
+            if (timingSafeEqual(given, want)) {
+              const admin = await db.get<{ id: string }>(
+                "SELECT id FROM users WHERE email = ? AND role = 'admin'",
+                ADMIN_EMAIL,
+              );
+              if (!admin) {
+                return send(401, {
+                  error:
+                    "Register with ADMIN_EMAIL first, then use this code to sign in.",
+                });
+              }
+              await db.audit(admin.id, "user", admin.id, "bootstrap-sign-in");
+              const token = await api.createSession(admin.id);
+              res.setHeader("set-cookie", sessionCookie(token));
+              return send(200, await api.sessionFor(token));
+            }
+          }
           // The code alone identifies the person: it was minted for exactly one
           // of them, so no address is needed or wanted — which is the point,
           // since an invited colleague may not have a usable one.
@@ -646,10 +685,10 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             const userId = String(b["userId"] ?? "");
             const issued = await access.approve(userId, session.userId);
             if (!issued) return send(404, { error: "No such request." });
-            // Approval nobody is told about is indistinguishable from being
-            // refused. They have never signed in, so this reaches them by
-            // email — the reason a personal address is asked for at all.
-            if (issued.kind === "link") {
+            // Told by email as well, when email works at all. It is a bonus
+            // rather than the mechanism: the administrator has the code on
+            // screen and can pass it on without anybody's mail server.
+            if (mailer.enabled) {
               void notifier.send(notifications.registrationApproved(userId)).catch(() => {});
             }
             return send(200, issued);
@@ -913,6 +952,11 @@ server.listen(PORT, HOST, () => {
   console.log(
     `  joining:    colleagues register themselves, ${BLOCKED_DOMAINS.map((d) => `@${d}`).join(", ")} refused; you approve`,
   );
+  if (ADMIN_BOOTSTRAP_CODE) {
+    console.log("");
+    console.log("  ADMIN_BOOTSTRAP_CODE is set. It signs you in as the administrator.");
+    console.log("  Use it once, then delete it from the environment.");
+  }
   if (OWN_TLS) {
     console.log(`  TLS:        this process, from TLS_CERT and TLS_KEY`);
   } else if (TRUST_PROXY) {

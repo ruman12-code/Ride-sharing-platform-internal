@@ -26,7 +26,17 @@ export const AccessGate = ({
   lang: Lang;
   onSignedIn: () => void;
 }) => {
-  const [mode, setMode] = useState<"sign-in" | "register">("sign-in");
+  /*
+    Three doors, and the code is the one that always opens.
+
+    A sign-in link needs a mail provider, and this pilot has now been stopped by
+    three of them: a host that blocks SMTP, a provider that demands an SMS that
+    never arrives, and an account suspended without warning. A code needs
+    nobody's servers — the administrator reads it off their screen and sends it
+    however they already talk to that colleague.
+  */
+  const [mode, setMode] = useState<"sign-in" | "register" | "code">("sign-in");
+  const [code, setCode] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [officialName, setOfficialName] = useState("");
@@ -104,6 +114,13 @@ export const AccessGate = ({
         const b = (await res.json()) as { ok: boolean; message: string };
         setMessage({ ok: b.ok, text: b.message });
         if (b.ok) setMode("sign-in");
+      } else if (mode === "code") {
+        const res = await post("/api/sign-in", { code });
+        if (res.ok) {
+          onSignedIn();
+          return;
+        }
+        setMessage({ ok: false, text: t("codeRejected", lang) });
       } else {
         const res = await post("/api/sign-in-link", { email });
         const b = (await res.json()) as { ok: boolean; message: string };
@@ -121,7 +138,9 @@ export const AccessGate = ({
   };
 
   const canSubmit =
-    email.trim().length > 3 && (mode === "sign-in" || name.trim().length > 0);
+    mode === "code"
+      ? code.trim().length >= 6
+      : email.trim().length > 3 && (mode === "sign-in" || name.trim().length > 0);
 
   if (arriving) {
     return (
@@ -145,6 +164,38 @@ export const AccessGate = ({
       <Unofficial lang={lang} />
 
       <div className="card raised">
+        {mode === "code" ? (
+          <>
+            <label className="label" htmlFor="code">{t("yourCode", lang)}</label>
+            <input
+              id="code"
+              className="input code-input"
+              autoComplete="one-time-code"
+              autoCapitalize="characters"
+              spellCheck={false}
+              /*
+                Not capped at six. Colleagues' codes are six characters, but
+                the administrator's own bootstrap code is whatever they chose
+                in the environment — and a cap of six silently truncated it,
+                so the one door meant to work when nothing else does could not
+                be typed into at all.
+              */
+              maxLength={64}
+              value={code}
+              /*
+                Upper-cased for display only when it looks like an invite code.
+                The bootstrap code is compared byte for byte, so folding its
+                case would stop it matching.
+              */
+              onChange={(e) => {
+                const v = e.target.value;
+                setCode(v.length <= 6 ? v.toUpperCase() : v);
+              }}
+            />
+            <p className="hint">{t("codeHint", lang)}</p>
+          </>
+        ) : (
+        <>
         <label className="label" htmlFor="email">
           {mode === "register" ? t("personalEmail", lang) : t("signInEmail", lang)}
         </label>
@@ -178,7 +229,6 @@ export const AccessGate = ({
         )}
 
         {mode === "sign-in" && <p className="hint">{t("signInLinkHint", lang)}</p>}
-
         {mode === "register" && (
           <>
             <label className="label" htmlFor="name" style={{ marginTop: 16 }}>
@@ -230,6 +280,8 @@ export const AccessGate = ({
             )}
           </>
         )}
+        </>
+        )}
 
         {message && (
           <div className={`notice ${message.ok ? "good" : "error"}`} style={{ marginTop: 16 }}>
@@ -243,9 +295,11 @@ export const AccessGate = ({
           disabled={!canSubmit || busy}
           onClick={() => void submit()}
         >
-          {busy
-            ? t(mode === "register" ? "register" : "sendingLink", lang)
-            : t(mode === "register" ? "register" : "sendLink", lang)}
+          {mode === "code"
+            ? t("signInWithCode", lang)
+            : busy
+              ? t(mode === "register" ? "register" : "sendingLink", lang)
+              : t(mode === "register" ? "register" : "sendLink", lang)}
         </button>
 
         <button
@@ -257,6 +311,22 @@ export const AccessGate = ({
           }}
         >
           {t(mode === "register" ? "alreadyHave" : "needAccount", lang)}
+        </button>
+
+        {/*
+          The code door, offered on every screen rather than hidden behind a
+          failure. It is the one that works when nothing else does, and a
+          colleague holding a code should not have to guess where to put it.
+        */}
+        <button
+          className="btn ghost block"
+          style={{ marginTop: 4 }}
+          onClick={() => {
+            setMode(mode === "code" ? "sign-in" : "code");
+            setMessage(undefined);
+          }}
+        >
+          {t(mode === "code" ? "useEmailInstead" : "haveCode", lang)}
         </button>
       </div>
 

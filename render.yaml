@@ -59,10 +59,17 @@ services:
       # outbound traffic to ports 25, 465 and 587 as policy, so no SMTP
       # configuration can work here — the connection hangs, which reads exactly
       # like a wrong password and is nothing of the kind.
+      # Optional. Without it the app still works: colleagues join by a code the
+      # administrator sends them, and notifications go by push. Email adds a
+      # sign-in link and reaches colleagues who never granted push permission.
       - key: BREVO_API_KEY
         sync: false
-      # Who the mail is from. Must be an address verified in Brevo.
       - key: SMTP_FROM
+        sync: false
+      # The administrator's own first way in, when no mailer is configured.
+      # Everybody else gets a code from the admin; the admin has nobody to get
+      # one from. Set any secret string, sign in once, then delete it.
+      - key: ADMIN_BOOTSTRAP_CODE
         sync: false
       # Push. Generate once with `npm run setup` and never again: every phone
       # already subscribed is tied to the old key and would go silent.

@@ -120,10 +120,21 @@ describe.skipIf(!hasPostgres)("approving somebody who gave a real address", () =
     return id;
   };
 
-  it("mints no code — they sign in by emailed link", async () => {
+  it("mints a code even though they gave a real address", async () => {
+    // Email is not dependable: hosts block SMTP, providers suspend accounts.
+    // A code needs nobody's servers, so approval always produces one.
     const id = await register("nusrat@personal.com");
-    expect(await access.approve(id, "admin")).toEqual({ kind: "link" });
-    expect(await db.all("SELECT id FROM invite_codes WHERE userId = ?", id)).toHaveLength(0);
+    const issued = await access.approve(id, "admin");
+    expect(issued?.kind).toBe("code");
+    expect(await db.all("SELECT id FROM invite_codes WHERE userId = ?", id)).toHaveLength(1);
+  });
+
+  it("admits them with that code, without touching their chosen name", async () => {
+    const id = await register("nusrat@personal.com");
+    const code = codeOf(await access.approve(id, "admin"));
+    expect(await access.redeemByCode(code)).toBe(id);
+    const row = await db.get<{ displayName: string }>("SELECT displayName FROM users WHERE id = ?", id);
+    expect(row?.displayName).toBe("Nusrat");
   });
 
   it("marks them approved and records who did it", async () => {

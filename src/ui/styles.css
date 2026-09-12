@@ -783,3 +783,23 @@ input[type="range"]::-moz-range-thumb {
   color: var(--warn-ink, #7a5216);
   font-weight: 650;
 }
+
+/*
+  The sign-in code.
+
+  Six characters read off somebody else's screen and retyped on a phone, often
+  while walking. Spaced and oversized so a Z is not mistaken for a 2 — the
+  alphabet already excludes O/0 and I/1 for the same reason.
+*/
+.code-input {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-align: center;
+  /*
+    No text-transform. It would show the administrator's bootstrap code in
+    capitals while sending the typed case to the server, which is exactly the
+    kind of mismatch nobody thinks to check.
+  */
+}

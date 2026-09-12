@@ -51,16 +51,21 @@ export const CODE_VALID_DAYS = 7;
 /**
  * What approving somebody actually produced.
  *
- * `code` — an invited row, which carries a placeholder address nothing can be
- *          sent to. A single-use code is minted and handed over in person.
- * `link` — they registered themselves with a real address, so approval is the
- *          whole action: from here they sign in by tapping an emailed link.
- *          Minting a code as well would hand them a second credential and
- *          point them at a door that no longer exists.
+ * Approving somebody always mints a code, whether or not mail can reach them.
+ *
+ * It used to mint one only for an invited row, on the reasoning that anybody
+ * who gave a real address could be sent a link instead. That reasoning held
+ * right up until email stopped being available: free hosts block outbound SMTP,
+ * and transactional providers gate their free tiers behind phone checks,
+ * domains, and suspensions — none of which an administrator can do anything
+ * about at eight in the morning with colleagues waiting.
+ *
+ * A code needs nobody's servers. The administrator reads it off the screen and
+ * passes it on however they already talk to that colleague. When mail does
+ * work, a link goes out as well and the code simply goes unused; it is
+ * single-use and expires in a week either way.
  */
-export type ApprovalResult =
-  | { readonly kind: "code"; readonly code: string }
-  | { readonly kind: "link" };
+export type ApprovalResult = { readonly kind: "code"; readonly code: string };
 
 export class Access {
   constructor(private readonly db: Db) {}
@@ -150,22 +155,6 @@ export class Access {
       userId,
     );
     if (!user) return undefined;
-
-    const now0 = new Date();
-    // A colleague who registered themselves gave a real address, so a link can
-    // reach them and approval is the whole action. Only an invited row — whose
-    // "address" is the `invite:` placeholder that exists to satisfy the unique
-    // index and can receive nothing — needs a code.
-    if (!user.email.startsWith("invite:")) {
-      await this.db.run(
-        "UPDATE users SET status = 'approved', approvedBy = ?, approvedAt = ? WHERE id = ?",
-        adminId,
-        now0.toISOString(),
-        userId,
-      );
-      await this.db.audit(adminId, "user", userId, "approve");
-      return { kind: "link" };
-    }
 
     const code = generateCode();
     const salt = randomBytes(16).toString("hex");

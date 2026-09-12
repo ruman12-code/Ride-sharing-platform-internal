@@ -36,7 +36,16 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
   const [pending, setPending] = useState<PendingRegistration[]>([]);
   const [approving, setApproving] = useState<string | undefined>();
   const [removing, setRemoving] = useState<string | undefined>();
-  const [justApproved, setJustApproved] = useState<string[]>([]);
+  /*
+    The code approval produced, kept on screen until dismissed.
+
+    This is how a colleague actually gets in. Email cannot be relied on — a host
+    that blocks SMTP, a provider that wants an SMS that never arrives, an
+    account suspended without notice — so the administrator reads the code here
+    and sends it however they already talk to that person.
+  */
+  const [approvedCode, setApprovedCode] = useState<{ name: string; code: string } | undefined>();
+  const [copied, setCopied] = useState(false);
   const [inviteName, setInviteName] = useState("");
   const [issued, setIssued] = useState<{ name: string; code: string } | undefined>();
   const [inviting, setInviting] = useState(false);
@@ -142,9 +151,11 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
                     headers: { "content-type": "application/json" },
                     body: JSON.stringify({ userId: p.id }),
                   })
-                    .then((r) => {
+                    .then(async (r) => {
                       if (!r.ok) return;
-                      setJustApproved((n) => [...n, p.displayName]);
+                      const b = (await r.json().catch(() => ({}))) as { code?: string };
+                      if (b.code) setApprovedCode({ name: p.displayName, code: b.code });
+                      setCopied(false);
                       // Refetched rather than spliced out locally, so the list
                       // reflects the server even if another admin device
                       // approved somebody at the same moment.
@@ -163,9 +174,41 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
           ))}
         </>
       )}
-      {justApproved.length > 0 && (
+      {approvedCode && (
         <div className="notice good" style={{ marginBottom: 4 }}>
-          {t("approved", lang)}: {justApproved.join(", ")}
+          <div style={{ fontSize: 13 }}>
+            {t("sendThemThis", lang)} — {approvedCode.name}
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 34,
+              fontWeight: 700,
+              letterSpacing: "0.22em",
+              margin: "8px 0 6px",
+            }}
+          >
+            {approvedCode.code}
+          </div>
+          <div style={{ fontSize: 12, marginBottom: 10 }}>{t("codeLasts", lang)}</div>
+          {/*
+            A whole message rather than the six characters alone, because what
+            the administrator actually does next is paste something into
+            WhatsApp, and a bare code with no instructions is a support
+            question waiting to happen.
+          */}
+          <button
+            className="btn secondary block"
+            onClick={() => {
+              const msg =
+                lang === "en"
+                  ? `You're in on Ekpothe. Open ${location.origin}, tap "I have a code" and enter: ${approvedCode.code}`
+                  : `একপথে-তে আপনি যুক্ত হয়েছেন। ${location.origin} খুলুন, "আমার কাছে কোড আছে" চাপুন এবং লিখুন: ${approvedCode.code}`;
+              void navigator.clipboard?.writeText(msg).then(() => setCopied(true)).catch(() => {});
+            }}
+          >
+            {copied ? t("copied", lang) : t("copyMessage", lang)}
+          </button>
         </div>
       )}
 

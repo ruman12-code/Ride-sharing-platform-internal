@@ -123,16 +123,16 @@ describe.skipIf(!hasPostgres)("the administrator", () => {
 });
 
 describe.skipIf(!hasPostgres)("approving somebody who registered themselves", () => {
-  it("mints no code, because a link can reach the address they gave", async () => {
+  it("mints a code, because email is not dependable", async () => {
     await accounts.register(good);
     const id = (await accounts.pending())[0]!.id;
 
     const issued = await new Access(db).approve(id, "admin");
 
-    expect(issued).toEqual({ kind: "link" });
-    expect(await db.all("SELECT id FROM invite_codes WHERE userId = ?", id)).toHaveLength(0);
-    // And a sign-in link can now be minted for them.
-    expect(new MagicLinks(db).request(good.email)).toBeDefined();
+    expect(issued?.kind).toBe("code");
+    expect(await db.all("SELECT id FROM invite_codes WHERE userId = ?", id)).toHaveLength(1);
+    // And a sign-in link still works, for wherever email is available.
+    expect(await new MagicLinks(db).request(good.email)).toBeDefined();
   });
 });
 

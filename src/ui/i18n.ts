@@ -168,6 +168,25 @@ export const STRINGS = {
   },
   // Signing in, without a password. See server/magic-link.ts for the why.
   sendLink: { en: "Email me a sign-in link", bn: "সাইন-ইন লিংক পাঠান" },
+  haveCode: { en: "I have a code", bn: "আমার কাছে কোড আছে" },
+  useEmailInstead: { en: "Use my email instead", bn: "বরং ইমেইল ব্যবহার করুন" },
+  yourCode: { en: "Your code", bn: "আপনার কোড" },
+  codeHint: {
+    en: "The six characters the administrator sent you. Not case-sensitive.",
+    bn: "অ্যাডমিন আপনাকে যে ছয়টি অক্ষর পাঠিয়েছেন। বড়-ছোট হাতের অক্ষরে সমস্যা নেই।",
+  },
+  signInWithCode: { en: "Sign in", bn: "সাইন ইন" },
+  codeRejected: {
+    en: "That code is not valid. Ask the administrator for a new one.",
+    bn: "কোডটি সঠিক নয়। অ্যাডমিনের কাছে নতুন কোড চান।",
+  },
+  sendThemThis: { en: "Send them this code", bn: "তাঁকে এই কোডটি পাঠান" },
+  copyMessage: { en: "Copy message", bn: "বার্তা কপি করুন" },
+  copied: { en: "Copied", bn: "কপি হয়েছে" },
+  codeLasts: {
+    en: "Works once, for seven days.",
+    bn: "একবার কাজ করবে, সাত দিনের জন্য।",
+  },
   sendingLink: { en: "Sending…", bn: "পাঠানো হচ্ছে…" },
   signInLinkHint: {
     en: "No password. We email you a link — tap it and you're in.",
