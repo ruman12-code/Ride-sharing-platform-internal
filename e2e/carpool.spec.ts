@@ -144,7 +144,16 @@ test("the zone picker filters a closed set and absorbs legacy spellings", async 
   ).toBeVisible();
 
   await page.locator("#zone-from").fill("Atlantis");
-  await expect(page.getByText(/No place by that name/)).toBeVisible();
+  /*
+    Still a closed set: typing a place nobody seeded offers no chip to choose,
+    which is the property this test exists for. What the dead end now *says* is
+    covered separately — it offers to pass the name to the administrator rather
+    than stopping at "no place by that name".
+  */
+  await expect(
+    page.getByRole("group", { name: "From" }).locator(".chip"),
+  ).toHaveCount(0);
+  await expect(page.getByText(/doesn't know that place yet/i)).toBeVisible();
 });
 
 test("a rider searches, and cannot confirm without answering the counterfactual", async ({ page }) => {
@@ -323,4 +332,60 @@ test("a short journey still offers somewhere to board, and the driver can add th
     their passengers more for the same drive.
   */
   await expect(page.locator(".meta").first()).toContainText(/km/);
+});
+
+test("a stop says what tapping it does, rather than only that it is on", async ({ page }) => {
+  /*
+    Every stop arrives switched on, so the line was a column of ticks — and a
+    column of ticks reads as "this is what we found", not "tap to change this".
+    Colleagues did not know the stops were theirs to remove, which is the one
+    thing the screen exists for. The tick is a status; the cross beside it is
+    what tapping does.
+  */
+  await gotoOffer(page);
+  await pickZone(page, "from", "Mirpur-10");
+  await pickZone(page, "to", "Gulshan-2");
+  await approveRoute(page);
+
+  const stops = page.locator(".routeline .stopbtn");
+  await expect(stops.first()).toContainText("✕");
+  // And said in words for anybody who cannot see the cross.
+  await expect(stops.first()).toHaveAttribute("aria-label", /tap to remove/);
+
+  // Once off, it offers to put it back rather than showing the same control.
+  await stops.first().click();
+  await expect(stops.first()).toHaveAttribute("aria-label", /tap to add/);
+  await expect(stops.first()).not.toContainText("✕");
+});
+
+test("a place Ekpothe does not know is a request, not a dead end", async ({ page }) => {
+  /*
+    The place list is closed on purpose and will never take free text as a
+    destination. But "No place by that name." with nothing after it is how a
+    colleague who lives somewhere unlisted concludes the app is not for them.
+  */
+  await gotoOffer(page);
+  await page.locator("#zone-from").fill("Basila");
+  await expect(page.getByText(/doesn't know that place yet/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Ask for it to be added/i })).toBeVisible();
+  // And it says what to do in the meantime, because the colleague still has a
+  // journey to post today.
+  await expect(page.getByText(/pick the nearest place the list does know/i)).toBeVisible();
+});
+
+test("a chosen place can be made precise in the driver's own words", async ({ page }) => {
+  /*
+    A zone is an area and an area is not a street corner. The app used to paper
+    over that by labelling every pickup point "<place> main road" — a guess
+    about a road the driver may not use, shown to the rider as a fact.
+  */
+  await gotoOffer(page);
+  await pickZone(page, "from", "Mirpur-10");
+  const note = page.locator("#origin-note");
+  await expect(note).toBeVisible();
+  // The question names the place, so it reads as a follow-up rather than a
+  // second address field.
+  await expect(note).toHaveAttribute("placeholder", /Mirpur-10/);
+  await note.fill("Benarasi Palli gate");
+  await expect(note).toHaveValue("Benarasi Palli gate");
 });

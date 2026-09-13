@@ -346,6 +346,13 @@ const BookingSheet = ({
                 </button>
               ))}
             </div>
+            {/*
+              Where the driver actually finishes, in their own words. A zone is
+              an area, and knowing the ride ends "in Gulshan-2" still leaves a
+              rider working out whether that is a ten-minute walk from their
+              desk.
+            */}
+            {match.ride.notes && <div className="hint">{match.ride.notes}</div>}
           </div>
 
           {/*

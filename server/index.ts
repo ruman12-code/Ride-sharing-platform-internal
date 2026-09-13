@@ -1,5 +1,5 @@
 import { setDefaultResultOrder } from "node:dns";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { readFileSync, existsSync } from "node:fs";
@@ -596,6 +596,34 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
         if (url.pathname === "/api/pending-requests" && req.method === "GET") {
           return send(200, { requests: await api.pendingForDriver(session.userId) });
         }
+        /*
+          "I looked for a place and it is not there."
+
+          Recorded rather than acted on. The place list stays a closed set,
+          because free text is what produced four spellings of one destination
+          in the legacy workbook and because matching cannot run over prose —
+          but a closed set nobody can add to is a closed door, and "no place by
+          that name" used to be the end of the road for anybody who lives
+          somewhere it does not list.
+        */
+        if (url.pathname === "/api/place-requests" && req.method === "POST") {
+          const b = await body(req);
+          const text = String(b["text"] ?? "").trim().slice(0, 120);
+          // Two characters is a typo, not a place. Silently accepted either way:
+          // the colleague has already been told the app does not know it, and a
+          // second refusal would say only that their request was refused too.
+          if (text.length >= 3) {
+            await db.run(
+              "INSERT INTO place_requests (id, text, askedBy, askedAt) VALUES (?, ?, ?, ?)",
+              randomUUID(),
+              text,
+              session.userId,
+              new Date().toISOString(),
+            );
+          }
+          return send(200, { ok: true });
+        }
+
         if (url.pathname === "/api/people" && req.method === "GET") {
           return send(200, { people: await api.listPeople() });
         }
@@ -758,6 +786,45 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             // button labelled as a convenience.
             if (!issued) return send(404, { error: "Nobody here can be given a code." });
             return send(200, issued);
+          }
+          if (url.pathname === "/api/admin/place-requests" && req.method === "GET") {
+            /*
+              Grouped, and counted. Three colleagues asking for the same place is
+              a different fact from one colleague asking three times, and the
+              administrator deciding whether to add it needs to tell them apart.
+            */
+            const rows = await db.all<{ text: string; asks: string; people: string; last: string }>(
+              `SELECT text,
+                      COUNT(*)              AS asks,
+                      COUNT(DISTINCT askedBy) AS people,
+                      MAX(askedAt)          AS last
+                 FROM place_requests
+                WHERE handledAt IS NULL
+                GROUP BY text
+                ORDER BY COUNT(DISTINCT askedBy) DESC, MAX(askedAt) DESC
+                LIMIT 50`,
+            );
+            return send(200, {
+              requests: rows.map((r) => ({
+                text: r.text,
+                asks: Number(r.asks),
+                people: Number(r.people),
+                last: r.last,
+              })),
+            });
+          }
+          if (url.pathname === "/api/admin/place-requests/handled" && req.method === "POST") {
+            const b = await body(req);
+            const text = String(b["text"] ?? "");
+            // By text rather than by row: the administrator is dismissing the
+            // request, and every colleague who asked for that place asked for
+            // the same thing.
+            await db.run(
+              "UPDATE place_requests SET handledAt = ? WHERE text = ? AND handledAt IS NULL",
+              new Date().toISOString(),
+              text,
+            );
+            return send(200, { ok: true });
           }
           if (url.pathname === "/api/admin/suspend" && req.method === "POST") {
             const b = await body(req);

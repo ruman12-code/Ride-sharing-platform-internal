@@ -90,6 +90,9 @@ export const STRINGS = {
     en: "These are the places on your route. Turn off any you'd rather not stop at — colleagues can only join where you do stop.",
     bn: "এগুলো আপনার রুটের জায়গা। যেখানে থামতে চান না বন্ধ করে দিন — সহকর্মীরা কেবল সেখানেই উঠতে পারবেন যেখানে আপনি থামবেন।",
   },
+  /* Read aloud by a screen reader in place of the tick and cross. */
+  stoppingTapToRemove: { en: "stopping here, tap to remove", bn: "এখানে থামবেন, বাদ দিতে ট্যাপ করুন" },
+  notStoppingTapToAdd: { en: "not stopping here, tap to add", bn: "এখানে থামবেন না, যোগ করতে ট্যাপ করুন" },
   allStops: { en: "All", bn: "সব" },
   noStops: { en: "None", bn: "কোনোটিই নয়" },
   stopsChosen: { en: "stops", bn: "টি জায়গা" },
@@ -125,6 +128,56 @@ export const STRINGS = {
   estimated: { en: "Estimated", bn: "আনুমানিক" },
   liveTraffic: { en: "Live traffic", bn: "সরাসরি ট্রাফিক" },
   anyStopOnRoute: { en: "Any stop on the route", bn: "রুটের যেকোনো জায়গা" },
+
+  /*
+    What happens when the place list does not have your place.
+
+    The list is closed on purpose and will never accept free text as a
+    destination — matching cannot run over prose, and the legacy workbook is
+    the proof. But telling somebody "no place by that name" and stopping there
+    is how they conclude the app is not for people like them. The request is
+    the difference: the list grows from what colleagues actually ask for.
+  */
+  noSuchPlace: {
+    en: "Ekpothe doesn't know that place yet.",
+    bn: "একপথে এখনো এই জায়গাটি চেনে না।",
+  },
+  askForPlace: { en: "Ask for it to be added", bn: "এটি যুক্ত করতে অনুরোধ করুন" },
+  placeAsked: {
+    en: "Asked. The administrator sees this — places get added as colleagues ask for them.",
+    bn: "অনুরোধ পাঠানো হয়েছে। অ্যাডমিন দেখতে পাবেন — সহকর্মীরা চাইলেই জায়গা যোগ করা হয়।",
+  },
+  meanwhilePickNearest: {
+    en: "For now, pick the nearest place the list does know — you can write exactly where in the next box.",
+    bn: "আপাতত তালিকায় থাকা সবচেয়ে কাছের জায়গাটি বেছে নিন — ঠিক কোথায়, পরের ঘরে লিখতে পারবেন।",
+  },
+
+  /*
+    The optional line that makes a listed place precise.
+
+    A zone is an area, and an area is not a street corner. Without this the app
+    invented one: every pickup point was labelled "<place> main road", which is
+    a guess about a road the driver may not use, printed as though it were
+    fact. The driver's own words replace it.
+  */
+  whereExactly: { en: "Where exactly?", bn: "ঠিক কোথায়?" },
+  whereExactlyHint: {
+    en: "Optional. A landmark, a gate, a road — whatever you would say on the phone.",
+    bn: "ঐচ্ছিক। কোনো ল্যান্ডমার্ক, গেট বা রাস্তার নাম — ফোনে যেভাবে বলতেন।",
+  },
+  whereExactlyStart: { en: "Where do you start?", bn: "কোথা থেকে শুরু করবেন?" },
+  whereExactlyEnd: { en: "Where do you finish?", bn: "কোথায় গিয়ে শেষ করবেন?" },
+  placesAsked: { en: "Places colleagues asked for", bn: "সহকর্মীরা যে জায়গাগুলো চেয়েছেন" },
+  noPlacesAsked: {
+    en: "Nobody has searched for a place Ekpothe does not know.",
+    bn: "একপথে চেনে না এমন কোনো জায়গা কেউ খোঁজেননি।",
+  },
+  placesAskedHint: {
+    en: "Add the ones worth having to the place list, then dismiss them here. Until a place is in the list, colleagues there pick the nearest one and write the detail themselves.",
+    bn: "যেগুলো দরকার সেগুলো জায়গার তালিকায় যোগ করুন, তারপর এখান থেকে সরিয়ে দিন। তালিকায় না থাকা পর্যন্ত সেখানকার সহকর্মীরা কাছের জায়গা বেছে নিয়ে নিজেরাই বিস্তারিত লিখবেন।",
+  },
+  askedByPeople: { en: "colleagues", bn: "জন সহকর্মী" },
+  dismiss: { en: "Done", bn: "হয়ে গেছে" },
 
   /**
    * The declaration, carried over verbatim from the legacy entry form.

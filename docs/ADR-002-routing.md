@@ -119,3 +119,103 @@ wrong, that is the signal to revisit this — not the cost share.
 | Colleagues report arrival times are consistently wrong | Enable Google, or calibrate `AVERAGE_SPEED_KMH` from completed-trip data — which the instrumentation already collects, and which costs nothing. |
 | Cost shares are disputed as inaccurate | Calibrate `ROAD_DETOUR_FACTOR` against odometer readings from real trips. A driver's measured km/L already overrides the fuel default; distance deserves the same treatment. |
 | Google billing lapses or quota exhausts | Already handled: the adapter falls back to the zone graph rather than failing. |
+
+---
+
+## Addendum, 2026-09-13 — what the route actually is, and what it is not
+
+Asked directly: *"How is the route calculated or optimised when there is no
+Google feed involved?"* This is the honest answer, written down because anybody
+looking at a confident line on a screen will assume more than is there.
+
+### The calculation, in order
+
+1. **Places are a closed list.** About sixty seeded zones and landmarks, each
+   with an approximate centroid — a latitude and longitude good to a few hundred
+   metres, not survey-grade. `src/adapters/local-json/seed/zones.ts`.
+
+2. **A graph is built from those coordinates.** Two places are linked if they
+   are within 5 km of each other in a straight line; every place additionally
+   links to its four nearest neighbours, one per compass quadrant, so nowhere
+   is stranded and no journey has to travel away from its destination to leave a
+   cluster. Links are undirected, because roads go both ways.
+
+3. **The shortest path is found by Dijkstra's algorithm** over that graph,
+   minimising **distance, not time**. With sixty nodes this is instant and runs
+   in the browser.
+
+4. **Straight-line distance is multiplied by 1.35** to approximate road
+   distance, and duration is that distance at **12 km/h** — Dhaka's average
+   traffic speed, a single constant applied to every road at every hour.
+
+5. **The answer is usually read from a file.** `route-table.json` holds every
+   ordered pair precomputed by exactly the above, so the app does no work per
+   request and contacts nobody. It is rebuilt by an administrator with
+   `npx tsx tools/build-route-table.ts` whenever places are added.
+
+6. **Boarding points are filled in separately** (`domain/matching/via.ts`).
+   Whatever the shortest path passes through is kept, and up to three places are
+   added that lie between the endpoints — tested both on how much further they
+   make the journey and on how far to the side they sit. That second test is
+   what stops Uttara → Gulshan-2 being routed by way of Mirpur-12, which costs
+   only 20% by the sum of two legs and is across the city.
+
+### What it therefore does not know
+
+- **Traffic.** Not live, not typical, not by hour or day. A journey at 08:15 and
+  the same journey at 14:00 return the same number.
+- **Roads.** There is no road network in this app. It knows where places are,
+  not what connects them — so one-way systems, flyovers, closed roads, and the
+  fact that the Buriganga has a limited number of bridges are all invisible.
+- **That a detour can be faster.** It minimises distance, so a longer road that
+  moves is always rated worse than a shorter one that does not.
+
+The consequence, stated plainly: a place can be genuinely on the driver's route
+and not be suggested. **Mirpur-10 → Gulshan-2 by way of Agargaon** is a road
+people really drive and is a 52% straight-line detour, so the app will not
+propose it. That is why the driver can add any place by hand, and why the hint
+under the route says *"nothing here knows about traffic"*.
+
+The numbers are labelled **Estimated** in the interface wherever they appear,
+and the cost share computed from them is a share of an estimate.
+
+### How this gets better, in the order worth doing it
+
+1. **Learn from drivers.** Record which stops drivers keep, remove and add, and
+   suggest the corridor most drivers actually chose for that pair. Within weeks
+   the app knows the Mirpur-10 → Gulshan-2 route because colleagues taught it —
+   no API key, no card, nothing leaving the tenant, and it improves with use.
+   This is the recommended next step.
+
+2. **Real road distances, offline.** `tools/build-route-table.ts --google`
+   already exists. One offline run asks a routing provider about pairs of public
+   landmarks — no colleague, no journey, no timestamp attached — and the answers
+   are then served locally forever. Real road geometry and typical durations, at
+   the cost of a billing account. Re-run when places change.
+
+3. **Live traffic per request.** Rejected in this ADR and still rejected: it
+   discloses a colleague's journey endpoints on every offer, and accumulates
+   into a record of who travels where and when. The privacy argument above has
+   not changed.
+
+### On place names, and growing the list
+
+The closed list is deliberate and stays: free-text destinations are what
+produced four spellings of one destination from a single colleague in five
+months (`LEGACY_AUDIT.md` D-04), and matching cannot run over prose.
+
+But a closed list nobody can add to shuts out everybody who lives somewhere it
+does not name. Two things address that without reopening free text:
+
+- **A search that finds nothing becomes a request.** The typed text is recorded
+  and surfaces on the Admin screen, grouped by how many *people* asked. An
+  administrator decides and adds the place to the seed list. The list grows from
+  where colleagues actually live.
+- **Any chosen place can be made precise in words.** "Where exactly?" under each
+  endpoint takes a landmark, a gate, a road — the driver's own phrasing, shown
+  to the rider. It is never a routing node: routing stays on the closed list,
+  and the words are detail attached to it.
+
+This also removed an invention. Every pickup point used to be labelled
+"*place* main road", which named a road nobody had mentioned and showed it to
+the rider as though it were a fact.

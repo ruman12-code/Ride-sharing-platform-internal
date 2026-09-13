@@ -53,6 +53,20 @@ export const ZonePicker = ({
 }) => {
   const [filter, setFilter] = useState("");
   const [area, setArea] = useState<string | undefined>();
+  /*
+    "No place by that name" used to be the end of the road.
+
+    The list stays closed — free entry is what produced four spellings of one
+    destination in the legacy workbook, and matching cannot run over prose. But
+    a closed list nobody can add to shuts out everybody who lives somewhere it
+    does not name, and telling them so without offering anything is how a
+    colleague decides the app is not for them.
+
+    So the dead end becomes a request. It does not create a place; it tells the
+    administrator what colleagues are looking for, and the list grows from what
+    people actually ask for rather than from what was guessed at the start.
+  */
+  const [asked, setAsked] = useState<string | undefined>();
   const inputId = `zone-${label.replace(/\s+/g, "-").toLowerCase()}`;
 
   const needle = filter.trim().toLowerCase();
@@ -122,9 +136,35 @@ export const ZonePicker = ({
             </button>
           ))}
           {searchHits.length === 0 && (
-            <span className="hint">
-              {lang === "en" ? "No place by that name." : "এই নামে কোনো জায়গা নেই।"}
-            </span>
+            <div style={{ width: "100%" }}>
+              <p className="hint" style={{ marginTop: 0 }}>{t("noSuchPlace", lang)}</p>
+              {asked === needle ? (
+                <p className="hint" style={{ color: "var(--green-700)" }}>{t("placeAsked", lang)}</p>
+              ) : (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => {
+                    const wanted = filter.trim();
+                    setAsked(needle);
+                    /*
+                      Not awaited and never reported as a failure. The colleague
+                      is choosing a nearby place next; a request that did not
+                      reach the server is not their problem to solve, and an
+                      error here would read as "your place was rejected".
+                    */
+                    void fetch("/api/place-requests", {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ text: wanted }),
+                    }).catch(() => undefined);
+                  }}
+                >
+                  {t("askForPlace", lang)}
+                </button>
+              )}
+              <p className="hint">{t("meanwhilePickNearest", lang)}</p>
+            </div>
           )}
         </div>
       ) : area ? (

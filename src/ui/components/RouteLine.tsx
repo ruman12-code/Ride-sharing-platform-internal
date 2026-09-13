@@ -1,4 +1,4 @@
-import type { Lang } from "../i18n.js";
+import { type Lang, t } from "../i18n.js";
 import { zoneName } from "./common.jsx";
 
 /**
@@ -49,6 +49,18 @@ export const RouteLine = ({
         );
       }
 
+      /*
+        A tick alone read as a status badge, not a control.
+
+        Every stop arrives switched on, so the whole line was ticks — and a
+        column of ticks says "this is what we found", not "tap to change this".
+        Colleagues did not know the stops were theirs to remove, which is the
+        one thing this screen exists for.
+
+        So an active stop now carries the tick *and* a cross: the tick says it
+        is on, the cross says what tapping does. An inactive one shows a plus,
+        which was already the case and was never the half that confused anybody.
+      */
       return (
         <div className={classes} key={s.zoneId}>
           <span className="marker" aria-hidden="true" />
@@ -56,10 +68,18 @@ export const RouteLine = ({
             type="button"
             className="stopbtn"
             aria-pressed={s.active}
+            aria-label={`${label} — ${t(s.active ? "stoppingTapToRemove" : "notStoppingTapToAdd", lang)}`}
             onClick={() => onToggle(s.zoneId)}
           >
             <span className="name">{label}</span>
-            <span className="tick" aria-hidden="true">{s.active ? "✓" : "＋"}</span>
+            {s.active ? (
+              <>
+                <span className="tick" aria-hidden="true">✓</span>
+                <span className="dropstop" aria-hidden="true">✕</span>
+              </>
+            ) : (
+              <span className="tick add" aria-hidden="true">＋</span>
+            )}
           </button>
         </div>
       );

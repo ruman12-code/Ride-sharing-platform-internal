@@ -23,6 +23,20 @@ import { COLLEAGUES, ME, type App } from "../store.js";
  * The optional fields are exactly what the registration form asks for and
  * nothing more: the administrator approves on recognition, not on a dossier.
  */
+/**
+ * A place colleagues looked for and Ekpothe does not know.
+ *
+ * Grouped by the text typed, because three colleagues asking for the same place
+ * and one colleague asking three times are different facts and the decision to
+ * add a place depends on which one it is.
+ */
+interface PlaceRequest {
+  readonly text: string;
+  readonly asks: number;
+  readonly people: number;
+  readonly last: string;
+}
+
 interface PendingRegistration {
   readonly id: string;
   readonly displayName: string;
@@ -76,6 +90,19 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<string | undefined>();
 
+  const [places, setPlaces] = useState<PlaceRequest[]>([]);
+
+  const loadPlaces = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/place-requests");
+      if (!res.ok) return;
+      const body = (await res.json()) as { requests?: PlaceRequest[] };
+      setPlaces(body.requests ?? []);
+    } catch {
+      // No server behind this build. Nothing has been asked for.
+    }
+  }, []);
+
   const loadPending = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/pending");
@@ -89,7 +116,8 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
 
   useEffect(() => {
     void loadPending();
-  }, [loadPending]);
+    void loadPlaces();
+  }, [loadPending, loadPlaces]);
 
   const octane = prices.find((p) => p.id === "fp-octane-2026-06")!;
   const stale = isStale(octane, today);
@@ -341,6 +369,62 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
               </div>
             </div>
           ))
+        )}
+      </div>
+
+      {/*
+        What colleagues could not find.
+
+        The place list is closed on purpose and will not take free text, which
+        left anybody living somewhere it does not name with "no place by that
+        name" and nowhere to go. Their search is recorded instead, and this is
+        where it surfaces — so the list grows from where colleagues actually
+        live rather than from what was guessed when it was written.
+
+        Adding a place is still a deliberate act, done in the code, by somebody
+        who checks the spelling. That is the step that keeps four spellings of
+        one destination from coming back.
+      */}
+      <p className="section-title">{t("placesAsked", lang)}</p>
+      <div className="card flush">
+        {places.length === 0 ? (
+          <p className="hint" style={{ margin: 16 }}>{t("noPlacesAsked", lang)}</p>
+        ) : (
+          <>
+            {places.map((q) => (
+              <div className="result" key={q.text}>
+                <div
+                  className="body"
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
+                >
+                  <div>
+                    {/*
+                      Typed by a colleague, so rendered as text and never as
+                      anything the app treats as a name it knows.
+                    */}
+                    <div className="name">{q.text}</div>
+                    <div className="dept">
+                      {num(q.people, lang)} {t("askedByPeople", lang)}
+                      {q.asks > q.people ? ` · ${num(q.asks, lang)}×` : ""}
+                    </div>
+                  </div>
+                  <button
+                    className="btn ghost"
+                    onClick={() => {
+                      void fetch("/api/admin/place-requests/handled", {
+                        method: "POST",
+                        headers: { "content-type": "application/json" },
+                        body: JSON.stringify({ text: q.text }),
+                      }).then(() => loadPlaces());
+                    }}
+                  >
+                    {t("dismiss", lang)}
+                  </button>
+                </div>
+              </div>
+            ))}
+            <p className="hint" style={{ margin: 16 }}>{t("placesAskedHint", lang)}</p>
+          </>
         )}
       </div>
 

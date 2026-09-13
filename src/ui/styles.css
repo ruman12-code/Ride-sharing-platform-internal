@@ -530,6 +530,30 @@ body {
 }
 .routeline .tick { margin-inline-start: auto; font-size: 13px; color: var(--green-600); font-weight: 700; }
 .routeline .stop.off .tick { color: var(--line-strong); }
+/* The cross next to the tick. Drawn as a control — bordered, round, its own
+   tap-sized box — because the tick beside it is a status and the two had to
+   stop looking like the same kind of thing. */
+.routeline .dropstop {
+  margin-inline-start: 8px;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  background: var(--card);
+}
+.routeline .stopbtn:hover .dropstop,
+.routeline .stopbtn:focus-visible .dropstop {
+  border-color: var(--red-700);
+  color: var(--red-700);
+}
+.routeline .tick.add { color: var(--green-700); font-size: 17px; }
 
 .routemeta {
   display: flex;

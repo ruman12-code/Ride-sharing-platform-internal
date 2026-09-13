@@ -300,6 +300,30 @@ CREATE TABLE IF NOT EXISTS login_links (
 CREATE INDEX IF NOT EXISTS idx_login_links_user ON login_links(userId, createdAt);
 
 
+-- Places colleagues looked for and did not find.
+--
+-- The place list is a closed set on purpose: free-text entry is what produced
+-- four spellings of one destination from a single colleague in the legacy
+-- workbook, and matching over free text cannot work. But a closed set that
+-- nobody can add to is a closed door for anybody who lives somewhere it does
+-- not list, and "no place by that name" was the end of the road.
+--
+-- So the search box records what was asked for. It does not create a place —
+-- an administrator reads these and decides, which is the step that keeps the
+-- list clean. The text is exactly what somebody typed, so it is treated as
+-- data and never as a name the app trusts.
+CREATE TABLE IF NOT EXISTS place_requests (
+  id        TEXT PRIMARY KEY,
+  text      TEXT NOT NULL,
+  askedBy   TEXT NOT NULL REFERENCES users(id),
+  askedAt   TEXT NOT NULL,
+  -- Set when an administrator has dealt with it, either by adding the place or
+  -- by deciding not to. Kept rather than deleted so the same request coming
+  -- back three times is visible as three times.
+  handledAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_place_requests_open ON place_requests(handledAt, askedAt);
+
 -- ---------------------------------------------------------------------------
 -- Changes to tables that already exist.
 --

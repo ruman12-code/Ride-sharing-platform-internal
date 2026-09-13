@@ -150,8 +150,12 @@ export const OfferFlow = ({
       setRouting(false);
       // A fresh pair of endpoints means the previous approval and hand-edit no
       // longer apply; keeping either would publish stops from another journey.
+      // The same goes for "where exactly": a landmark in Mirpur-10 is not a
+      // landmark in Uttara, and carrying it over would publish a direction to
+      // somewhere the driver is no longer going.
       setViaTouched(false);
       setRouteApproved(false);
+      setAdded([]);
     });
     return () => {
       cancelled = true;
@@ -187,6 +191,19 @@ export const OfferFlow = ({
     stop on this one.
   */
   const [added, setAdded] = useState<readonly string[]>([]);
+  /*
+    Where exactly, in the driver's own words.
+
+    A zone is an area and an area is not a street corner, so a rider given only
+    "Mirpur-10" still has to ring and ask. The app used to paper over that by
+    labelling every pickup point "<place> main road" — a guess about a road the
+    driver may not use, printed to the rider as though it were a fact.
+
+    Optional, because a driver who does not want to be that specific should not
+    have to be, and because for many pairs the area name really is enough.
+  */
+  const [originNote, setOriginNote] = useState("");
+  const [destinationNote, setDestinationNote] = useState("");
   const effectiveVia = viaTouched ? via : suggested;
 
   /*
@@ -320,11 +337,28 @@ export const OfferFlow = ({
       fuelPriceId: ACTIVE_FUEL_PRICE.id,
       fuelRatePerKm: breakdown.fuelRatePerKm,
       distanceKm,
+      /*
+        The driver's own words where they gave any, and the place name where
+        they did not. Never "<place> main road", which was invented: it named a
+        road nobody had mentioned and the rider had no way to know it was a
+        guess.
+      */
       pickupPoints: [origin, ...effectiveVia].map((zid) => ({
         zoneId: zid,
-        label: `${zoneName(zid, "en")} main road`,
+        label:
+          zid === origin && originNote.trim()
+            ? `${zoneName(zid, "en")} — ${originNote.trim()}`
+            : zoneName(zid, "en"),
         walkingMinutes: 4,
       })),
+      /*
+        Where the journey ends, in the driver's own words.
+
+        `notes` has existed on the ride since the first schema and nothing has
+        ever written or read it. This is its first use and defines it: the
+        drop-off detail a rider needs and a zone name cannot carry.
+      */
+      ...(destinationNote.trim() ? { notes: destinationNote.trim() } : {}),
       vehicle: { type: "car", model, colour, plateLast4: plate, ratedKmPerLitre: 12, fuelType: "octane" },
       preferences: prefs,
       status: "published",
@@ -394,9 +428,47 @@ export const OfferFlow = ({
 
           <div className="card">
             <ZonePicker value={origin} onChange={setOrigin} lang={lang} exclude={destination} label={t("from", lang)} />
+            {/*
+              Only once a place is chosen, because "where exactly?" with no
+              "where" above it is a question about nothing. The place name is
+              put in the question itself — "Where in Mirpur-10?" — so it reads
+              as a follow-up rather than a second address field.
+            */}
+            {origin && (
+              <div style={{ marginTop: 12 }}>
+                <label className="label" htmlFor="origin-note">
+                  {t("whereExactlyStart", lang)}
+                </label>
+                <input
+                  id="origin-note"
+                  className="input"
+                  maxLength={80}
+                  value={originNote}
+                  onChange={(e) => setOriginNote(e.target.value)}
+                  placeholder={`${t("whereExactly", lang)} ${zoneName(origin, lang)}…`}
+                />
+                <p className="hint">{t("whereExactlyHint", lang)}</p>
+              </div>
+            )}
           </div>
           <div className="card">
             <ZonePicker value={destination} onChange={setDestination} lang={lang} exclude={origin} label={t("to", lang)} />
+            {destination && (
+              <div style={{ marginTop: 12 }}>
+                <label className="label" htmlFor="destination-note">
+                  {t("whereExactlyEnd", lang)}
+                </label>
+                <input
+                  id="destination-note"
+                  className="input"
+                  maxLength={80}
+                  value={destinationNote}
+                  onChange={(e) => setDestinationNote(e.target.value)}
+                  placeholder={`${t("whereExactly", lang)} ${zoneName(destination, lang)}…`}
+                />
+                <p className="hint">{t("whereExactlyHint", lang)}</p>
+              </div>
+            )}
           </div>
 
           {origin && destination && (
