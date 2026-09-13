@@ -45,9 +45,25 @@ describe("directional connectivity", () => {
     expect(west.zoneSequence).not.toContain("uttara-jashimuddin");
     expect(west.distanceKm).toBeLessThan(13);
 
-    // And an eastward journey from the same place still goes east.
-    const east = graph.route("uttara-diabari", "gulshan-2")!;
-    expect(east.zoneSequence).toContain("kuril");
+    /*
+      And a journey south from the same place makes progress the whole way.
+
+      This used to assert the route passed Kuril, as a stand-in for "it does not
+      double back". That proxy stopped holding when Mirpur DOHS was added to the
+      zone set: Diabari to Gulshan-2 by way of Mirpur DOHS and Kalshi is shorter
+      and is a road people drive, so the graph found it. The proxy was stale, not
+      the graph — which is the argument for asserting the property rather than
+      one path that happened to satisfy it.
+    */
+    const south = graph.route("uttara-diabari", "gulshan-2")!;
+    const target = ZONES.find((z) => z.id === "gulshan-2")!;
+    const remaining = south.zoneSequence.map((id) =>
+      haversineKm(ZONES.find((z) => z.id === id)!, target),
+    );
+    for (let i = 1; i < remaining.length; i++) {
+      expect(remaining[i]!, `step ${i} of ${south.zoneSequence.join(" > ")}`)
+        .toBeLessThan(remaining[i - 1]!);
+    }
   });
 
   it("routes landmarks in one area differently, because they are apart", () => {

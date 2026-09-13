@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import type { DayOfWeek } from "../../domain/types.js";
 import type { Ride } from "../../domain/entities/ride.js";
 import type { Route } from "../../domain/matching/geo.js";
+import { AVERAGE_SPEED_KMH, ROAD_DETOUR_FACTOR } from "../../domain/matching/geo.js";
+import { MAX_VIA, orderAlongRoute, pathDistanceKm, suggestVia } from "../../domain/matching/via.js";
+import { ZONES } from "../../adapters/local-json/seed/zones.js";
 import {
   IN_KIND_SUGGESTIONS,
   MAX_IN_KIND_NOTE,
@@ -155,21 +158,107 @@ export const OfferFlow = ({
     };
   }, [app, origin, destination]);
 
+  /*
+    The places a colleague could board.
+
+    This used to be the planner's own route minus its endpoints, and for the
+    shortest journeys that is nothing at all: the zone graph links any two
+    places within five kilometres directly, so Mirpur-10 to Gulshan-2 came back
+    as a single hop and the offer had nowhere for anybody to get in except the
+    very start. A carpool along a corridor with no stops on the corridor is a
+    car with one door.
+
+    `suggestVia` keeps whatever the planner found — those zones are on its own
+    shortest path and have the better claim — and fills up to three from the
+    places that lie between the two endpoints. It is geometry, not traffic; the
+    hint under the line says so, and the driver can change any of it.
+  */
   const suggested = useMemo(
-    () => (route ? route.zoneSequence.slice(1, -1) : []),
-    [route],
+    () =>
+      route && origin && destination
+        ? suggestVia(origin, destination, ZONES, route.zoneSequence.slice(1, -1))
+        : [],
+    [route, origin, destination],
   );
+  /*
+    Stops the driver added by hand, which the suggester never proposed — a
+    landmark like Mirpur DOHS, or a corridor the straight line cannot see.
+    Cleared with the endpoints, since a stop on last journey's route is not a
+    stop on this one.
+  */
+  const [added, setAdded] = useState<readonly string[]>([]);
   const effectiveVia = viaTouched ? via : suggested;
 
-  // Distance comes from the planner. When the driver removes a stop the route
-  // shortens, so the figure is scaled by the fraction of stops kept rather than
-  // left overstating a journey that is no longer being made.
+  /*
+    Everything on the line: suggested and hand-added together, in the order they
+    are passed. What the driver has switched off stays on the line struck
+    through, because "I do not stop there" and "that is not on my route" are
+    different statements and the line has always distinguished them.
+  */
+  const offeredVia = useMemo(
+    () =>
+      origin && destination
+        ? orderAlongRoute(origin, destination, [...suggested, ...added, ...effectiveVia], ZONES)
+        : [],
+    [origin, destination, suggested, added, effectiveVia],
+  );
+  const lineSequence = useMemo(
+    () => (origin && destination ? [origin, ...offeredVia, destination] : []),
+    [origin, destination, offeredVia],
+  );
+
+  const addStop = (zoneId: string): void => {
+    if (!origin || !destination) return;
+    if (zoneId === origin || zoneId === destination) return;
+    if (offeredVia.includes(zoneId) && effectiveVia.includes(zoneId)) return;
+    setAdded((prev) => (prev.includes(zoneId) ? prev : [...prev, zoneId]));
+    setViaTouched(true);
+    setVia(orderAlongRoute(origin, destination, [...effectiveVia, zoneId], ZONES));
+  };
+
+  /*
+    Distance for the route the driver is actually describing.
+
+    The planner's own figure while its own stops stand. Once the driver edits
+    them it is measured along what they chose — which used to be approximated by
+    scaling the planner's distance by the fraction of suggested stops kept. That
+    was defensible while stops could only be removed and became wrong the moment
+    they could be added: a fourth stop added to three scaled the journey up by a
+    third, so a driver saying "I also pass Banani" was quoted a longer trip and
+    charged their passengers more for the same drive.
+
+    Never shorter than the direct route: a detour cannot save distance, and a
+    figure that said otherwise would under-price every journey somebody
+    lengthened.
+  */
   const distanceKm = useMemo(() => {
+    if (!route || !origin || !destination) return 0;
+    const planners = route.zoneSequence.slice(1, -1);
+    const same =
+      effectiveVia.length === planners.length &&
+      effectiveVia.every((z, i) => z === planners[i]);
+    if (same) return route.distanceKm;
+    const along = pathDistanceKm(
+      [origin, ...effectiveVia, destination],
+      ZONES,
+      ROAD_DETOUR_FACTOR,
+    );
+    return Math.max(route.distanceKm, Math.round(along * 10) / 10);
+  }, [route, origin, destination, effectiveVia]);
+  /*
+    Minutes for the distance actually being driven.
+
+    The planner's own figure while its own stops stand, and derived from the
+    edited distance once they do not — otherwise a driver who added a stop saw
+    the kilometres go up and the journey time sit unchanged at the number
+    computed for a route they had just stopped describing.
+  */
+  const durationMinutes = useMemo(() => {
     if (!route) return 0;
-    if (!viaTouched || suggested.length === 0) return route.distanceKm;
-    const kept = (effectiveVia.length + 2) / (suggested.length + 2);
-    return Math.max(1, Math.round(route.distanceKm * kept * 10) / 10);
-  }, [route, viaTouched, suggested.length, effectiveVia.length]);
+    if (distanceKm === route.distanceKm) return route.durationMinutes;
+    return Math.max(1, Math.round((distanceKm / AVERAGE_SPEED_KMH) * 60));
+  }, [route, distanceKm]);
+
   // Guarded on distance.
   //
   // The pricing domain rejects a non-positive distance rather than quietly
@@ -325,7 +414,16 @@ export const OfferFlow = ({
               {!routing && route && !routeApproved && (
                 <>
                   <span className="label">{t("suggestedRoute", lang)}</span>
-                  <RouteLine lang={lang} stops={routeStops(route.zoneSequence, route.zoneSequence)} />
+                  {/*
+                    The stops, here on the first card rather than only after the
+                    route is accepted. This card used to draw the planner's raw
+                    sequence, which for a short journey is two dots and a line —
+                    so a driver pressed "Use this route" having been shown no
+                    route at all, only its endpoints, and nothing on the screen
+                    suggested there was anything to choose.
+                  */}
+                  <RouteLine lang={lang} stops={routeStops(lineSequence, [origin, ...effectiveVia, destination])} />
+                  {offeredVia.length > 0 && <p className="hint">{t("viaSuggested", lang)}</p>}
                   <div className="routemeta">
                     <span>
                       <span className="big">{num(route.distanceKm, lang)}</span>{" "}
@@ -375,7 +473,7 @@ export const OfferFlow = ({
                   </div>
                   <div className="meta" style={{ marginTop: 8 }}>
                     <span><strong>{num(distanceKm, lang)} km</strong></span>
-                    <span>~{num(route.durationMinutes, lang)} {t("minutes", lang)}</span>
+                    <span>~{num(durationMinutes, lang)} {t("minutes", lang)}</span>
                     <span>
                       {num(effectiveVia.length, lang)} {t("stopsChosen", lang)}
                     </span>
@@ -384,22 +482,29 @@ export const OfferFlow = ({
                   <span className="label" style={{ marginTop: 18 }}>{t("pickYourStops", lang)}</span>
                   <RouteLine
                     lang={lang}
-                    stops={routeStops(route.zoneSequence, [origin, ...effectiveVia, destination])}
+                    stops={routeStops(lineSequence, [origin, ...effectiveVia, destination])}
                     onToggle={(zid) => {
                       setViaTouched(true);
+                      /*
+                        Switching a stop back on used to rebuild the list from
+                        the suggestions, which silently dropped anything the
+                        driver had added by hand. Now it puts that one stop back
+                        and re-orders along the journey, so a hand-added place
+                        survives being toggled off and on again.
+                      */
                       setVia(
                         effectiveVia.includes(zid)
                           ? effectiveVia.filter((v) => v !== zid)
-                          : suggested.filter((z) => effectiveVia.includes(z) || z === zid),
+                          : orderAlongRoute(origin, destination, [...effectiveVia, zid], ZONES),
                       );
                     }}
                   />
 
-                  {suggested.length > 0 && (
+                  {offeredVia.length > 0 && (
                     <div className="btnrow" style={{ marginTop: 10 }}>
                       <button
                         className="btn ghost"
-                        onClick={() => { setViaTouched(true); setVia(suggested); }}
+                        onClick={() => { setViaTouched(true); setVia(offeredVia); }}
                       >
                         {t("allStops", lang)}
                       </button>
@@ -412,6 +517,28 @@ export const OfferFlow = ({
                     </div>
                   )}
                   <p className="hint">{t("pickYourStopsHint", lang)}</p>
+                  {/*
+                    Somewhere to add a place the suggester did not propose.
+
+                    It only ever knew how to take stops away, which assumed the
+                    suggestion was always a superset of the real route. It is
+                    geometry: it cannot know that the driver goes round by ECB
+                    Chattar because the direct way is a car park at eight in the
+                    morning. Only the driver knows that, and until now there was
+                    nowhere to say it.
+                  */}
+                  {effectiveVia.length < MAX_VIA + 2 && (
+                    <div style={{ marginTop: 14 }}>
+                      <ZonePicker
+                        value={undefined}
+                        onChange={addStop}
+                        lang={lang}
+                        label={t("addAStop", lang)}
+                      />
+                      <p className="hint">{t("addAStopHint", lang)}</p>
+                    </div>
+                  )}
+
                 </>
               )}
             </div>

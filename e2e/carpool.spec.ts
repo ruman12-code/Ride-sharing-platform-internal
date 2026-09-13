@@ -277,3 +277,50 @@ test("the “not an official system” notice is a notice, not a footnote", asyn
   );
   expect(size).toBeGreaterThanOrEqual(14);
 });
+
+test("a short journey still offers somewhere to board, and the driver can add their own", async ({ page }) => {
+  /*
+    Mirpur-10 and Gulshan-2 are 4.9 km apart in a straight line, under the five
+    kilometres at which the zone graph links two places directly — so the
+    planner returned a single hop, the route card drew two dots and a line, and
+    the published ride had nowhere for anybody to get in except the very start.
+    A carpool along a corridor with no stops on the corridor is a car with one
+    door, so this is the product failing rather than a cosmetic gap.
+  */
+  await gotoOffer(page);
+  await pickZone(page, "from", "Mirpur-10");
+  await pickZone(page, "to", "Gulshan-2");
+
+  const line = page.locator(".routeline .name");
+  await expect(line.first()).toHaveText(/Mirpur-10/);
+  // Stops on the card the driver accepts, not only after they accept it.
+  await expect(await line.count()).toBeGreaterThan(2);
+
+  await approveRoute(page);
+
+  /*
+    And somewhere to name a place the suggester cannot know about. It is
+    geometry: it does not know the driver goes round by ECB Chattar because the
+    direct way is a car park at eight in the morning. Only the driver knows
+    that, and the stops could previously only be taken away.
+  */
+  await page.locator("#zone-add-a-place-you-pass").fill("ECB");
+  await page.getByRole("button", { name: "ECB Chattar", exact: true }).first().click();
+  // Scoped to the line: the hint underneath names ECB Chattar as an example, so
+  // an unscoped match finds two and proves nothing about the route.
+  await expect(line.filter({ hasText: "ECB Chattar" })).toHaveCount(1);
+
+  // Ordered along the journey rather than appended to the end.
+  const stops = await line.allInnerTexts();
+  expect(stops.indexOf("ECB Chattar")).toBeGreaterThan(0);
+  expect(stops.indexOf("ECB Chattar")).toBeLessThan(stops.length - 1);
+
+  /*
+    And the journey is re-measured. The old code scaled the planner's distance
+    by the fraction of suggested stops kept, which was defensible while stops
+    could only be removed: adding one made the trip longer in proportion to the
+    count rather than the detour, so a driver saying "I also pass here" charged
+    their passengers more for the same drive.
+  */
+  await expect(page.locator(".meta").first()).toContainText(/km/);
+});

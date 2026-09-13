@@ -106,6 +106,21 @@ export const STRINGS = {
     en: "Colleagues can join or get off at any of these stops. Tap one to remove it.",
     bn: "সহকর্মীরা এই যেকোনো জায়গায় উঠতে বা নামতে পারেন। বাদ দিতে ট্যাপ করুন।",
   },
+  /*
+    Says where the suggestion comes from, because a route drawn confidently on a
+    screen reads as authoritative and this one is not. There is no traffic data
+    in this app: these are the known places that lie between the two endpoints,
+    and the driver is the only person who knows which way they actually go.
+  */
+  viaSuggested: {
+    en: "Places we think are on your way. Nothing here knows about traffic — change them to match the route you really drive.",
+    bn: "আমাদের ধারণা এই জায়গাগুলো আপনার পথে পড়ে। এখানে ট্রাফিকের কোনো তথ্য নেই — আপনি আসলে যে পথে যান সেভাবে বদলে নিন।",
+  },
+  addAStop: { en: "Add a place you pass", bn: "আপনি যে জায়গা দিয়ে যান যোগ করুন" },
+  addAStopHint: {
+    en: "Type any place — Mirpur DOHS, ECB Chattar, Banani Graveyard. Anywhere you pass is somewhere a colleague can wait.",
+    bn: "যেকোনো জায়গার নাম লিখুন — মিরপুর ডিওএইচএস, ইসিবি চত্বর, বনানী কবরস্থান। আপনি যেখান দিয়ে যান, সেখানেই একজন সহকর্মী অপেক্ষা করতে পারেন।",
+  },
   minutes: { en: "min", bn: "মিনিট" },
   estimated: { en: "Estimated", bn: "আনুমানিক" },
   liveTraffic: { en: "Live traffic", bn: "সরাসরি ট্রাফিক" },

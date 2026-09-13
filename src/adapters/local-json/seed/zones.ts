@@ -105,6 +105,8 @@ export const ZONES: readonly Zone[] = [
   ]),
   z("niketan", "Niketan", "নিকেতন", 23.7757, 90.4118, ["c-south"], []),
   z("banani", "Banani", "বনানী", 23.7936, 90.4043, ["c-north", "c-west"], ["banani 11"]),
+  lm("banani-graveyard", "banani", "Banani Graveyard", "বনানী কবরস্থান", 23.7885, 90.4008, ["banani koborsthan", "banani kabarsthan", "graveyard"]),
+  lm("banani-chairman-bari", "banani", "Chairman Bari", "চেয়ারম্যান বাড়ি", 23.7897, 90.4063, ["chairmanbari", "chairman bari banani"]),
   z("mohakhali", "Mohakhali", "মহাখালী", 23.7783, 90.4053, ["c-west", "c-south"], ["mohakhali dohs"]),
 
   // --- Western corridor: Mirpur -> Gulshan --------------------------------
@@ -117,13 +119,16 @@ export const ZONES: readonly Zone[] = [
   lm("mirpur-benarasi", "mirpur-10", "Benarasi Palli", "বেনারসী পল্লী", 23.8028, 90.3661, ["benaroshi polli"]),
   z("mirpur-11", "Mirpur-11", "মিরপুর-১১", 23.8194, 90.3654, ["c-west"], ["mirpur 11"]),
   z("mirpur-12", "Mirpur-12", "মিরপুর-১২", 23.8279, 90.3654, ["c-west"], ["mirpur 12"]),
+  lm("mirpur-dohs", "mirpur-12", "Mirpur DOHS", "মিরপুর ডিওএইচএস", 23.8286, 90.3699, ["mirpur dohs", "dohs mirpur"]),
   z("kalshi", "Kalshi", "কালশী", 23.8235, 90.3805, ["c-west"], ["kalshi road"]),
+  lm("ecb-chattar", "kalshi", "ECB Chattar", "ইসিবি চত্বর", 23.8258, 90.3901, ["ecb chottor", "ecb circle", "matikata"]),
   z("kazipara", "Kazipara", "কাজীপাড়া", 23.7965, 90.3742, ["c-west"], []),
   z("shewrapara", "Shewrapara", "শেওড়াপাড়া", 23.7906, 90.3773, ["c-west"], []),
   z("agargaon", "Agargaon", "আগারগাঁও", 23.7776, 90.3795, ["c-west"], ["agargao"]),
   z("shyamoli", "Shyamoli", "শ্যামলী", 23.7746, 90.3660, ["c-west"], ["shamoli", "syamoli"]),
   z("bijoy-sarani", "Bijoy Sarani", "বিজয় সরণি", 23.7657, 90.3833, ["c-west", "c-south"], ["bijoy soroni"]),
   z("tejgaon", "Tejgaon", "তেজগাঁও", 23.7639, 90.3925, ["c-south"], ["tejgao"]),
+  lm("pmo", "tejgaon", "Prime Minister\u2019s Office", "প্রধানমন্ত্রীর কার্যালয়", 23.7661, 90.3899, ["pmo", "pm office", "ganabhaban"]),
   z("farmgate", "Farmgate", "ফার্মগেট", 23.7583, 90.3897, ["c-south"], ["farm gate"]),
   z("karwan-bazar", "Karwan Bazar", "কারওয়ান বাজার", 23.7508, 90.3934, ["c-south"], ["kawran bazar"]),
 
