@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildWorkbook, exportFilename } from "../../export/excel.js";
 import { writeWorkbook } from "../../export/xlsx-writer.js";
 import { FUEL_PRICES } from "../../adapters/local-json/seed/fuel.js";
@@ -44,7 +44,29 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
     account suspended without notice — so the administrator reads the code here
     and sends it however they already talk to that person.
   */
-  const [approvedCode, setApprovedCode] = useState<{ name: string; code: string } | undefined>();
+  const [approvedCode, setApprovedCode] = useState<
+    { name: string; code: string; mine?: boolean } | undefined
+  >();
+  const [reissuing, setReissuing] = useState<string | undefined>();
+  /*
+    Bring a freshly issued code into view.
+
+    The panel sits under the approval queue, but a code can now be issued from
+    the member list much further down — and a code that appears off-screen reads
+    as a button that did nothing, which is how somebody presses it three times
+    and invalidates the code they just sent.
+
+    Keyed on the code itself, and deliberately not done in a ref callback. A ref
+    callback runs on every render, so the page slid away under the finger on any
+    state change at all — pressing "New code" scrolled the screen out from under
+    the press and the tap landed on nothing. That was not a test artefact: it is
+    what a colleague's thumb would have done too.
+  */
+  const codePanel = useRef<HTMLDivElement | null>(null);
+  const showing = approvedCode?.code;
+  useEffect(() => {
+    if (showing) codePanel.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [showing]);
   const [copied, setCopied] = useState(false);
   const [inviteName, setInviteName] = useState("");
   const [issued, setIssued] = useState<{ name: string; code: string } | undefined>();
@@ -175,9 +197,9 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
         </>
       )}
       {approvedCode && (
-        <div className="notice good" style={{ marginBottom: 4 }}>
+        <div className="notice good" style={{ marginBottom: 4 }} ref={codePanel}>
           <div style={{ fontSize: 13 }}>
-            {t("sendThemThis", lang)} — {approvedCode.name}
+            {approvedCode.mine ? approvedCode.name : `${t("sendThemThis", lang)} — ${approvedCode.name}`}
           </div>
           <div
             style={{
@@ -200,8 +222,17 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
           <button
             className="btn secondary block"
             onClick={() => {
-              const msg =
-                lang === "en"
+              /*
+                Your own spare key is not being handed to anybody, so it does
+                not get a welcome message addressed to somebody else. It gets
+                the two things you will need when you are standing in front of a
+                new phone: where to go and what to type.
+              */
+              const msg = approvedCode.mine
+                ? lang === "en"
+                  ? `Ekpothe spare key. Open ${location.origin}, tap "I have a code" and enter: ${approvedCode.code}`
+                  : `একপথে বাড়তি চাবি। ${location.origin} খুলুন, "আমার কাছে কোড আছে" চাপুন এবং লিখুন: ${approvedCode.code}`
+                : lang === "en"
                   ? `You're in on Ekpothe. Open ${location.origin}, tap "I have a code" and enter: ${approvedCode.code}`
                   : `একপথে-তে আপনি যুক্ত হয়েছেন। ${location.origin} খুলুন, "আমার কাছে কোড আছে" চাপুন এবং লিখুন: ${approvedCode.code}`;
               void navigator.clipboard?.writeText(msg).then(() => setCopied(true)).catch(() => {});
@@ -231,33 +262,82 @@ export const Admin = ({ app, lang }: { app: App; lang: Lang }) => {
                   <div className="name">{m.displayName}</div>
                   {m.department && <div className="dept">{m.department}</div>}
                 </div>
-                {/*
-                  Not offered for your own row. Removing yourself would sign you
-                  out of the only account that can approve anybody, and leave
-                  the pilot with no way back in.
-                */}
-                {m.id !== app.identity.userId && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {/*
+                    A fresh code, for the colleague who still belongs here but
+                    can no longer get in: a new phone, a cleared browser, or a
+                    session that reached its ninety days. A code is single-use,
+                    so without this the app would have stranded people one at a
+                    time with nothing in the interface to do about it.
+
+                    Offered on your own row too, where it is not something to
+                    pass on: you are the one person with nobody to ask, so this
+                    is how you sign in on a second device without going back to
+                    the environment variables.
+
+                    It expires in seven days like any other code, so it is for a
+                    move you are making now. The standing way back into this
+                    account is ADMIN_BOOTSTRAP_CODE, which lives in the host's
+                    environment and does not expire.
+                  */}
                   <button
                     className="btn ghost"
-                    disabled={removing === m.id}
+                    disabled={reissuing === m.id}
                     onClick={() => {
-                      if (!confirm(t("removeConfirm", lang))) return;
-                      setRemoving(m.id);
-                      void fetch("/api/admin/suspend", {
+                      const mine = m.id === app.identity.userId;
+                      if (!mine && !confirm(t("newCodeConfirm", lang))) return;
+                      setReissuing(m.id);
+                      void fetch("/api/admin/reissue", {
                         method: "POST",
                         headers: { "content-type": "application/json" },
                         body: JSON.stringify({ userId: m.id }),
                       })
-                        .then((r) => {
-                          if (r.ok) return app.refresh();
-                          return undefined;
+                        .then(async (r) => {
+                          if (!r.ok) return;
+                          const b = (await r.json().catch(() => ({}))) as { code?: string };
+                          if (!b.code) return;
+                          setApprovedCode({
+                            name: mine ? t("yourSpareKey", lang) : m.displayName,
+                            code: b.code,
+                            mine,
+                          });
+                          setCopied(false);
                         })
-                        .finally(() => setRemoving(undefined));
+                        .finally(() => setReissuing(undefined));
                     }}
                   >
-                    {t("remove", lang)}
+                    {reissuing === m.id
+                      ? "…"
+                      : t(m.id === app.identity.userId ? "spareKey" : "newCode", lang)}
                   </button>
-                )}
+                  {/*
+                    Not offered for your own row. Removing yourself would sign
+                    you out of the only account that can approve anybody, and
+                    leave the pilot with no way back in.
+                  */}
+                  {m.id !== app.identity.userId && (
+                    <button
+                      className="btn ghost"
+                      disabled={removing === m.id}
+                      onClick={() => {
+                        if (!confirm(t("removeConfirm", lang))) return;
+                        setRemoving(m.id);
+                        void fetch("/api/admin/suspend", {
+                          method: "POST",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ userId: m.id }),
+                        })
+                          .then((r) => {
+                            if (r.ok) return app.refresh();
+                            return undefined;
+                          })
+                          .finally(() => setRemoving(undefined));
+                      }}
+                    >
+                      {t("remove", lang)}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))

@@ -58,8 +58,22 @@ export const AccessGate = ({
     never arrives, and an account suspended without warning. A code needs
     nobody's servers — the administrator reads it off their screen and sends it
     however they already talk to that colleague.
+
+    So the code door leads, and the email door appears only when the server says
+    a link can actually be delivered. It used to lead regardless, which meant
+    the first thing every colleague saw was a box asking for an address, an
+    assurance that a link was on its way, and then nothing — with no way to tell
+    that from a slow mail server, and no reason to look further down the screen
+    for the code they had been sent on WhatsApp five minutes earlier.
   */
-  const [mode, setMode] = useState<"sign-in" | "register" | "code">("sign-in");
+  const [mode, setMode] = useState<"sign-in" | "register" | "code">("code");
+  /*
+    Undefined until the server answers. Not `false`: starting at false and
+    correcting a moment later makes the door flicker into existence on a
+    working installation, which reads as a bug in the one screen that has to
+    look dependable.
+  */
+  const [emailDoor, setEmailDoor] = useState<boolean | undefined>();
   const [code, setCode] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -118,9 +132,24 @@ export const AccessGate = ({
   useEffect(() => {
     void fetch("/api/config")
       .then((r) => r.json())
-      .then((c: { blockedDomains?: string[] }) => setBlocked(c.blockedDomains ?? []))
-      .catch(() => undefined);
+      .then((c: { blockedDomains?: string[]; signInByEmail?: boolean }) => {
+        setBlocked(c.blockedDomains ?? []);
+        setEmailDoor(c.signInByEmail === true);
+      })
+      // No server behind this build, or it did not answer. The code door works
+      // without one and asking for an address would not.
+      .catch(() => setEmailDoor(false));
   }, []);
+
+  /*
+    Somebody may still be standing on the email door when the answer arrives —
+    the app opened on "sign-in" for them once, or they tapped through to it
+    before the config landed. Move them to the door that works rather than
+    leaving them typing into one that does not.
+  */
+  useEffect(() => {
+    if (emailDoor === false && mode === "sign-in") setMode("code");
+  }, [emailDoor, mode]);
 
   const post = (path: string, payload: unknown): Promise<Response> =>
     fetch(path, {
@@ -143,7 +172,11 @@ export const AccessGate = ({
         });
         const b = (await res.json()) as { ok: boolean; message: string };
         setMessage({ ok: b.ok, text: b.message });
-        if (b.ok) setMode("sign-in");
+        // To the door that opens, not the one that used to be first. A
+        // colleague who has just registered is waiting for a code from the
+        // administrator; telling them to go and check their email would be the
+        // second false promise in a row.
+        if (b.ok) setMode(emailDoor ? "sign-in" : "code");
       } else if (mode === "code") {
         const res = await post("/api/sign-in", { code: normaliseCode(code) });
         if (res.ok) {
@@ -241,6 +274,9 @@ export const AccessGate = ({
               onChange={(e) => setCode(e.target.value)}
             />
             <p className="hint">{t("codeHint", lang)}</p>
+            {/* Only where the code is the only way in. Where a link works too,
+                "ask somebody" is not the answer — asking for a link is. */}
+            {emailDoor === false && <p className="hint">{t("needAnotherCode", lang)}</p>}
           </>
         ) : (
         <>
@@ -372,7 +408,10 @@ export const AccessGate = ({
           className="btn ghost block"
           style={{ marginTop: 8 }}
           onClick={() => {
-            setMode(mode === "register" ? "sign-in" : "register");
+            // Leaving registration goes back to whichever door opens. It used
+            // to go to the email one unconditionally, which is how a colleague
+            // ended up on a dead screen by pressing "I already have an account".
+            setMode(mode === "register" ? (emailDoor ? "sign-in" : "code") : "register");
             setMessage(undefined);
             setAgreed(false);
           }}
@@ -381,20 +420,24 @@ export const AccessGate = ({
         </button>
 
         {/*
-          The code door, offered on every screen rather than hidden behind a
-          failure. It is the one that works when nothing else does, and a
-          colleague holding a code should not have to guess where to put it.
+          The switch between the two ways of signing in, and it is offered only
+          when there are two. With no mailer the code door is the only one, so
+          this button would lead nowhere and its own label — "use my email
+          instead" — would be the clearest possible statement that an email
+          route exists. It does not.
         */}
-        <button
-          className="btn ghost block"
-          style={{ marginTop: 4 }}
-          onClick={() => {
-            setMode(mode === "code" ? "sign-in" : "code");
-            setMessage(undefined);
-          }}
-        >
-          {t(mode === "code" ? "useEmailInstead" : "haveCode", lang)}
-        </button>
+        {emailDoor === true && (
+          <button
+            className="btn ghost block"
+            style={{ marginTop: 4 }}
+            onClick={() => {
+              setMode(mode === "code" ? "sign-in" : "code");
+              setMessage(undefined);
+            }}
+          >
+            {t(mode === "code" ? "useEmailInstead" : "haveCode", lang)}
+          </button>
+        )}
       </div>
 
       <div className="card">

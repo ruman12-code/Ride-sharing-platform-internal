@@ -150,25 +150,75 @@ export class Access {
    * copy of the database does not hand anybody a working code.
    */
   async approve(userId: string, adminId: string): Promise<ApprovalResult | undefined> {
-    const user = await this.db.get<{ id: string; email: string }>(
-      "SELECT id, email FROM users WHERE id = ?",
-      userId,
-    );
+    const user = await this.db.get<{ id: string }>("SELECT id FROM users WHERE id = ?", userId);
     if (!user) return undefined;
 
-    const code = generateCode();
-    const salt = randomBytes(16).toString("hex");
     const now = new Date();
-
     await this.db.run(
       "UPDATE users SET status = 'approved', approvedBy = ?, approvedAt = ? WHERE id = ?",
       adminId,
       now.toISOString(),
       userId,
     );
-    // Any earlier unused code stops working: re-approving should not leave two
-    // valid ways in.
-    await this.db.run("UPDATE invite_codes SET usedAt = ? WHERE userId = ? AND usedAt IS NULL", now.toISOString(), userId);
+    const code = await this.mint(userId, now);
+    await this.db.audit(adminId, "user", userId, "approve");
+    return { kind: "code", code };
+  }
+
+  /**
+   * Issue a fresh code to somebody who is already in.
+   *
+   * This is the way back for a colleague who has lost their access rather than
+   * their approval, and until it existed there was none. A code is single-use;
+   * a session lasts ninety days. So a colleague who cleared their browser,
+   * changed phone, or simply waited out the ninety days had spent their one
+   * code, and the other door — a link sent to their address — needs a mail
+   * provider this pilot has repeatedly not had. The honest description of that
+   * state is that every colleague was on a ninety-day fuse, and the app would
+   * have started stranding people one at a time with nothing in the interface
+   * to do about it.
+   *
+   * Deliberately not `approve()` again. Re-approving would rewrite `approvedBy`
+   * and `approvedAt`, so the record of who vouched for this colleague and when
+   * would be replaced every time they lost their phone — and that record is the
+   * only thing standing behind the claim that somebody recognised them.
+   *
+   * Refused for anybody not currently approved. A pending colleague is approved
+   * instead, which is a decision rather than a reissue; a suspended one must not
+   * be handed a working code by a button labelled as a convenience.
+   */
+  async reissue(userId: string, adminId: string): Promise<{ code: string } | undefined> {
+    const user = await this.db.get<{ id: string; status: string; isSuspended: number }>(
+      "SELECT id, status, isSuspended FROM users WHERE id = ?",
+      userId,
+    );
+    if (!user || user.status !== "approved" || Number(user.isSuspended) === 1) return undefined;
+
+    const code = await this.mint(userId, new Date());
+    await this.db.audit(adminId, "user", userId, "reissue-code");
+    return { code };
+  }
+
+  /**
+   * Store one code for one person, and retire whatever came before it.
+   *
+   * Shared by approval, invitation and reissue so that the retiring cannot be
+   * forgotten in one of them: two live codes for one colleague means a code
+   * passed on last week still opens the door after a new one was issued, which
+   * is exactly what reissuing is for undoing.
+   *
+   * Only the hash is stored. The plaintext is returned once, to be read off the
+   * administrator's screen, and is not recoverable afterwards — so a copy of
+   * this database hands nobody a working code.
+   */
+  private async mint(userId: string, now: Date): Promise<string> {
+    const code = generateCode();
+    const salt = randomBytes(16).toString("hex");
+    await this.db.run(
+      "UPDATE invite_codes SET usedAt = ? WHERE userId = ? AND usedAt IS NULL",
+      now.toISOString(),
+      userId,
+    );
     await this.db.run(
       `INSERT INTO invite_codes (id, userId, codeHash, salt, createdAt, expiresAt)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -179,8 +229,7 @@ export class Access {
       now.toISOString(),
       new Date(now.getTime() + CODE_VALID_DAYS * 24 * 3_600_000).toISOString(),
     );
-    await this.db.audit(adminId, "user", userId, "approve");
-    return { kind: "code", code };
+    return code;
   }
 
   async suspend(userId: string, adminId: string): Promise<void> {

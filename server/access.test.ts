@@ -200,3 +200,124 @@ describe.skipIf(!hasPostgres)("suspending", () => {
     expect(actions).toContain("suspend");
   });
 });
+
+describe.skipIf(!hasPostgres)("issuing a fresh code to somebody already in", () => {
+  /*
+    The way back for a colleague who has lost their access rather than their
+    approval. Until this existed there was none: a code is single-use, a session
+    lasts ninety days, and the other door needs a mail provider this pilot has
+    repeatedly not had. Every colleague was on a ninety-day fuse.
+  */
+  const joined = async (name = "Nusrat"): Promise<string> => {
+    const { userId } = await access.invite(name, "admin");
+    return userId;
+  };
+
+  it("lets somebody in again after their first code was spent", async () => {
+    const userId = await joined();
+    // The whole scenario, in three lines: they joined, then changed phone.
+    const first = (await access.reissue(userId, "admin"))!.code;
+    expect(await access.redeemByCode(first)).toBe(userId);
+
+    const second = (await access.reissue(userId, "admin"))!.code;
+    expect(await access.redeemByCode(second)).toBe(userId);
+  });
+
+  it("kills the previous code, so a forwarded one stops working", async () => {
+    const userId = await joined();
+    const old = (await access.reissue(userId, "admin"))!.code;
+    const fresh = (await access.reissue(userId, "admin"))!.code;
+
+    // Two live codes for one colleague would mean the code you sent last week
+    // still opens the door after you issued a new one — which is the thing
+    // reissuing exists to undo.
+    expect(await access.redeemByCode(old)).toBeUndefined();
+    expect(await access.redeemByCode(fresh)).toBe(userId);
+  });
+
+  it("does not rewrite who vouched for them, or when", async () => {
+    const userId = await joined();
+    const before = await db.get<{ approvedBy: string; approvedAt: string }>(
+      "SELECT approvedBy, approvedAt FROM users WHERE id = ?",
+      userId,
+    );
+    await access.reissue(userId, "someone-else");
+    const after = await db.get<{ approvedBy: string; approvedAt: string }>(
+      "SELECT approvedBy, approvedAt FROM users WHERE id = ?",
+      userId,
+    );
+    // That record is the only thing standing behind the claim that somebody
+    // recognised this colleague. Losing a phone must not replace it.
+    expect(after).toEqual(before);
+  });
+
+  it("refuses somebody suspended", async () => {
+    const userId = await joined();
+    await access.suspend(userId, "admin");
+    // A button labelled as a convenience must not be a way back in for somebody
+    // who has just been removed.
+    expect(await access.reissue(userId, "admin")).toBeUndefined();
+  });
+
+  it("refuses somebody still waiting to be approved", async () => {
+    await db.run(
+      "INSERT INTO users (id, displayName, email, status, createdAt) VALUES (?, ?, ?, 'pending', ?)",
+      "p1",
+      "Waiting",
+      "waiting@example.com",
+      new Date().toISOString(),
+    );
+    // Approving them is a decision. Reissuing is not, and must not stand in
+    // for one.
+    expect(await access.reissue("p1", "admin")).toBeUndefined();
+    expect(await access.redeemByCode("ANYTHG")).toBeUndefined();
+  });
+
+  it("refuses an id that is nobody", async () => {
+    expect(await access.reissue("no-such-person", "admin")).toBeUndefined();
+  });
+
+  it("works for the administrator's own row", async () => {
+    // The one person with nobody to ask. A spare key minted before they need
+    // it is the difference between moving to a new phone and going back to the
+    // environment variables.
+    await db.run(
+      `INSERT INTO users (id, displayName, email, status, role, createdAt)
+       VALUES (?, ?, ?, 'approved', 'admin', ?)`,
+      "the-admin",
+      "Ruman",
+      "ruman@personal.com",
+      new Date().toISOString(),
+    );
+    const spare = (await access.reissue("the-admin", "the-admin"))!.code;
+    expect(await access.redeemByCode(spare)).toBe("the-admin");
+  });
+
+  it("stores only a hash, so a copy of the database hands nobody a way in", async () => {
+    const userId = await joined();
+    const code = (await access.reissue(userId, "admin"))!.code;
+    const rows = await db.all<{ codeHash: string }>("SELECT codeHash FROM invite_codes");
+    for (const row of rows) expect(row.codeHash).not.toContain(code);
+  });
+
+  it("expires like any other code", async () => {
+    const userId = await joined();
+    await access.reissue(userId, "admin");
+    const row = await db.get<{ createdAt: string; expiresAt: string }>(
+      "SELECT createdAt, expiresAt FROM invite_codes WHERE userId = ? AND usedAt IS NULL",
+      userId,
+    );
+    const days = (Date.parse(row!.expiresAt) - Date.parse(row!.createdAt)) / 86_400_000;
+    expect(Math.round(days)).toBe(CODE_VALID_DAYS);
+  });
+
+  it("writes an audit row, because handing out a way in is accountable", async () => {
+    const userId = await joined();
+    await access.reissue(userId, "admin");
+    const audit = await db.all<{ action: string }>(
+      "SELECT action FROM audit_log WHERE entityId = ?",
+      userId,
+    );
+    expect(audit.map((a) => a.action)).toContain("reissue-code");
+  });
+});

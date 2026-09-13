@@ -215,6 +215,16 @@ export const STRINGS = {
     bn: "অ্যাডমিন আপনাকে যে কোড পাঠিয়েছেন। ছয় অক্ষরের কোড বড়-ছোট হাতের যেকোনোভাবে লেখা যায়; এর চেয়ে বড় কোড হুবহু লিখতে হবে।",
   },
   signInWithCode: { en: "Sign in", bn: "সাইন ইন" },
+  /*
+    Shown under the code box when there is no email door. A code works once, so
+    the second time somebody needs one — a new phone, a cleared browser — they
+    have to know that asking is the route, and that it is a normal thing to ask
+    for rather than an admission that they lost something.
+  */
+  needAnotherCode: {
+    en: "New phone, or cleared your browser? A code works once — ask the administrator for another. It takes them a moment.",
+    bn: "নতুন ফোন, নাকি ব্রাউজার মুছে ফেলেছেন? একটি কোড একবারই কাজ করে — অ্যাডমিনের কাছে আরেকটি চান। তাঁর এক মুহূর্তও লাগবে না।",
+  },
   codeRejected: {
     en: "That code is not valid. Ask the administrator for a new one.",
     bn: "কোডটি সঠিক নয়। অ্যাডমিনের কাছে নতুন কোড চান।",
@@ -230,6 +240,28 @@ export const STRINGS = {
     bn: "কোডটি ঠিক আছে, কিন্তু এখনো কোনো অ্যাডমিন অ্যাকাউন্ট নেই। ফিরে গিয়ে \u201cআমার অ্যাকাউন্ট দরকার\u201d বেছে নিন, ADMIN_EMAIL ঠিকানা দিয়ে নিবন্ধন করুন, তারপর এখানে ফিরে আসুন।",
   },
   sendThemThis: { en: "Send them this code", bn: "তাঁকে এই কোডটি পাঠান" },
+  newCode: { en: "New code", bn: "নতুন কোড" },
+  /*
+    Your own row says "spare key" rather than "new code", because it is not for
+    passing on. It is for the administrator to hold before they need it: they
+    are the one person with nobody to ask.
+  */
+  spareKey: { en: "Code for me", bn: "আমার কোড" },
+  /*
+    Says what it is rather than what it sounds like. "Keep it somewhere safe"
+    was the first wording and it was a promise the code does not keep: this
+    expires in seven days like any other, so it is for a move you are making
+    now, not a key for a drawer. The standing way back into the administrator
+    account is ADMIN_BOOTSTRAP_CODE, which is in Render and does not expire.
+  */
+  yourSpareKey: {
+    en: "Your own code — for signing in on another device this week",
+    bn: "আপনার নিজের কোড — এই সপ্তাহে অন্য ডিভাইসে সাইন ইন করার জন্য",
+  },
+  newCodeConfirm: {
+    en: "Issue a new code? Any code this colleague has not used yet will stop working.",
+    bn: "নতুন কোড দেবেন? এই সহকর্মীর আগের অব্যবহৃত কোড আর কাজ করবে না।",
+  },
   copyMessage: { en: "Copy message", bn: "বার্তা কপি করুন" },
   copied: { en: "Copied", bn: "কপি হয়েছে" },
   codeLasts: {

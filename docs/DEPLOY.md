@@ -92,8 +92,17 @@ third-party relay lands in spam often enough that it cannot be the only door.
    a six-character code with a lower-case letter in it can never match. The boot
    log warns if you pick one; it is easier not to.
 
-   Use it once, then delete it from the environment. While it is set it is a
-   standing password to the administrator account.
+   **Keep it set.** An earlier version of this document said to use it once and
+   delete it, on the assumption that email would come back and a sign-in link
+   would be the way home. Email is not coming back, and every other route into
+   the administrator account expires: a session lasts ninety days, and a code
+   lasts seven. Delete this and a lost phone in month four means editing the
+   database by hand.
+
+   It is a standing password, and that is what it is for. It costs nothing in
+   practice: anybody who can read it can already read `DATABASE_URL` from the
+   same page, so it hands out no access the host's own login did not already
+   give. Make it long, and treat the Render dashboard as the place it lives.
 
    `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are generated **once**. Every
    phone that subscribes is tied to them, so regenerating later makes every
@@ -130,8 +139,8 @@ the app is broken when it is not:
 2. Choose **I have a code** and enter `ADMIN_BOOTSTRAP_CODE` exactly as you set
    it in Render — it is case-sensitive. You land signed in as the admin.
 
-3. Delete `ADMIN_BOOTSTRAP_CODE` from Render now, while you remember. Your
-   session lasts ninety days and is not affected.
+3. Leave `ADMIN_BOOTSTRAP_CODE` set. It is your way back in when this phone is
+   lost or this session runs out — see step 3 above.
 
 4. Turn on notifications when asked.
 
@@ -180,3 +189,25 @@ visit.
 The honest signals are colleagues complaining about the wait on first use in the
 morning, or Neon's storage filling. Both are answered by paying a few dollars a
 month on either service; nothing in the app has to change.
+
+
+## 5. When somebody cannot get in
+
+A code works once. A session lasts ninety days. So "I can't get in" is a normal
+thing to hear from a colleague who has changed phone, cleared their browser, or
+simply been using the app since the spring — it is not a sign that anything is
+broken, and it is not a reason to remove and re-add them.
+
+Open **Admin → Colleagues who are in**, find their name, and press **New code**.
+You get a fresh six-character code and a **Copy message** button with the whole
+instruction in English or Bangla, ready to paste into WhatsApp. Their previous
+code stops working at that moment, which is deliberate: two live codes for one
+person means the one you sent last month still opens the door.
+
+Your own row has the same button, labelled **Code for me**. It signs you in on a
+second device — a laptop, a new phone you are setting up today. It expires in
+seven days like any other, so it is not a key to keep in a drawer. The key you
+keep is `ADMIN_BOOTSTRAP_CODE`, in Render.
+
+Removing somebody is different and lives next to it: **Remove** suspends the
+account, ends their session immediately, and kills any code they were holding.

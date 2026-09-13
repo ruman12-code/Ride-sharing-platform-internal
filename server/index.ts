@@ -497,6 +497,24 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
             selfRegister: true,
             pushKey: VAPID_PUBLIC ?? null,
             blockedDomains: BLOCKED_DOMAINS,
+            /*
+              Whether the door marked "email me a sign-in link" can actually
+              open.
+
+              The app offered it unconditionally, and the reply to asking for a
+              link is deliberately the same whether one was sent or not — so
+              that the form cannot be used to find out who has registered. With
+              no mailer that combination is a trap: the first screen a colleague
+              sees is a box asking for an address, it tells them a link is on
+              its way, and nothing ever arrives. They have no way to tell that
+              from a slow mail server, and no reason to look for the code door
+              further down.
+
+              So the client is told, and hides the door rather than furnishing a
+              lie. A relay that is configured but answering "broken" counts as
+              no relay: a door that is shut is worse than no door at all.
+            */
+            signInByEmail: mailer.enabled && mailStatus.state !== "broken",
           });
         }
 
@@ -716,6 +734,30 @@ const handler: Parameters<typeof createServer>[1] = (req, res) => {
           if (url.pathname === "/api/admin/invite" && req.method === "POST") {
             const b = await body(req);
             return send(200, await access.invite(String(b["displayName"] ?? ""), session.userId));
+          }
+          /*
+            A fresh code for somebody already in.
+
+            The way back for a colleague who has lost their access rather than
+            their approval — a cleared browser, a new phone, a session that
+            reached ninety days. Until this existed there was none, because a
+            code is single-use and the other door needs a mail provider this
+            pilot has repeatedly not had.
+
+            Offered for the administrator's own row too. They are the one person
+            with nobody to ask, and a spare key minted before they need it is
+            the difference between moving to a new phone and going back to the
+            environment variables.
+          */
+          if (url.pathname === "/api/admin/reissue" && req.method === "POST") {
+            const b = await body(req);
+            const issued = await access.reissue(String(b["userId"] ?? ""), session.userId);
+            // One reply for "no such person" and "not somebody who can hold a
+            // code" alike: a pending colleague is approved rather than
+            // reissued, and a suspended one is not handed a working code by a
+            // button labelled as a convenience.
+            if (!issued) return send(404, { error: "Nobody here can be given a code." });
+            return send(200, issued);
           }
           if (url.pathname === "/api/admin/suspend" && req.method === "POST") {
             const b = await body(req);
